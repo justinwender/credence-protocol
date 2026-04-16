@@ -186,36 +186,43 @@ contract LendingPool is Ownable, ReentrancyGuard {
      * @notice Returns the collateral ratio (basis points) that applies for a
      *         given composite score under the current curve.
      *         10000 bps = 100%. 15000 = 150%. 7500 = 75%.
+     * @dev Control points:
+     *         (0, ratios[0]), (bp[0], ratios[1]), (bp[1], ratios[2]),
+     *         (bp[2], ratios[3]), (bp[3], ratios[4]), (bp[4], ratios[5])
+     *      Interpolation is piecewise-linear between successive control
+     *      points; outside the curve's domain, the edge ratios apply.
      */
     function getCollateralRatioBps(uint8 score) public view returns (uint16) {
         uint256 s = score;
-        // Below the first breakpoint
-        if (s <= scoreBreakpoints[0]) {
-            return collateralRatiosBps[0];
-        }
-        // Above the last breakpoint
+        // Above the last breakpoint → floor ratio
         if (s >= scoreBreakpoints[4]) {
             return collateralRatiosBps[5];
         }
-        // Find the segment containing the score
+        // Segment 0: [0, breakpoints[0]] — from ratios[0] to ratios[1]
+        if (s <= scoreBreakpoints[0]) {
+            return _interp(s, 0, scoreBreakpoints[0], collateralRatiosBps[0], collateralRatiosBps[1]);
+        }
+        // Segments 1-4: [breakpoints[i], breakpoints[i+1]] — from ratios[i+1] to ratios[i+2]
         for (uint256 i = 0; i < 4; i++) {
             uint256 lo = scoreBreakpoints[i];
             uint256 hi = scoreBreakpoints[i + 1];
             if (s >= lo && s <= hi) {
-                uint256 lowBps = collateralRatiosBps[i + 1];
-                uint256 highBps = collateralRatiosBps[i];
-                // Interpolate downward from highBps (at score=lo) to lowBps (at score=hi)
-                // (ratios are monotonically non-increasing with score)
-                uint256 range = hi - lo;
-                uint256 delta = highBps - lowBps; // highBps >= lowBps
-                uint256 offset = s - lo;
-                // ratio = highBps - (offset * delta / range)
-                uint256 ratio = highBps - (offset * delta) / range;
-                return uint16(ratio);
+                return _interp(s, lo, hi, collateralRatiosBps[i + 1], collateralRatiosBps[i + 2]);
             }
         }
-        // Fallback (shouldn't reach here)
+        // Unreachable
         return collateralRatiosBps[5];
+    }
+
+    /// @dev Linear interpolation. Requires y0 >= y1 (ratios are non-increasing).
+    function _interp(uint256 s, uint256 x0, uint256 x1, uint256 y0, uint256 y1)
+        internal pure returns (uint16)
+    {
+        if (x1 == x0) return uint16(y0);
+        uint256 delta = y0 - y1;
+        uint256 offset = s - x0;
+        uint256 ratio = y0 - (offset * delta) / (x1 - x0);
+        return uint16(ratio);
     }
 
     /**
