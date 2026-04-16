@@ -109,9 +109,29 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
 - **Phase 2** ✅ — SQL queries written + executed via Allium Explorer API. All 6 CSVs in `data/raw/` with 115,687 rows each. Venus project name = `venus_finance`.
 - **Phase 3** 🚧 — Feature engineering + logit training in `model/train.py`. Output validation metrics, coefficient report. CHECKPOINT: user reviews metrics, confirms model to freeze.
 - **Phase 4** — Smart contracts + tests in Foundry. CHECKPOINT 4a: user reviews compiled interfaces + interaction flow. Deploy to BSC testnet. CHECKPOINT 4b: user reviews deployed addresses + test tx.
+  - **Phase 4 design note — `CreditOracle.getCompositeScore` onchain-only cap**:
+    - When `hasOffchainAttestation == false`, the composite score must be capped:
+      `compositeScore = (onchainScore * onchainOnlyMultiplier) / 100`
+    - `onchainOnlyMultiplier` is a configurable `uint8` state variable, admin-settable, default `50` (i.e., 0.50x).
+    - This means the best onchain-only wallet (raw score 100) maps to composite 50 → ~110–115% collateral.
+    - Rationale (include as a comment in the contract): the onchain model alone is a narrow view of financial life. Undercollateralized lending (<100%) requires a verified offchain attestation — this is the protocol's core value proposition.
+    - When both onchain and offchain are present, apply the configurable weighted blend (no cap).
 - **Phase 5** — Scoring pipeline (`pipeline/`). Decide Wallet-API vs per-chain approach. CHECKPOINT: score a test wallet end-to-end, show output.
 - **Phase 6** — Frontend. CHECKPOINT: walk through full demo flow end-to-end.
-- **Phase 7** — Documentation: architecture, pitch narrative, demo script, hackathon report. CHECKPOINT: final review before submission.
+  - **User-facing feature labels (Phase 6 + Phase 7)**: everywhere a feature name is shown to the user or judge (factor breakdown component, ScoreGauge tooltips, validation report, hackathon report), use the display labels below — NOT the internal variable names. Internal names remain in the code, model artifacts, and `feature_config.json`. Display labels are also stored in `feature_config.json.feature_display_names` so they're the single source of truth.
+    - `lending_active_days` → "Borrowing protocol activity (days)"
+    - `borrow_repay_ratio` → "Repayment consistency ratio"
+    - `repay_count` → "Loan repayment count"
+    - `unique_borrow_tokens` → "Distinct assets borrowed"
+    - `current_total_usd` → "Portfolio value (USD)"
+    - `stablecoin_ratio` → "Stablecoin allocation"
+    - `crosschain_total_tx_count` → "Cross-chain transaction volume"
+    - `crosschain_dex_trade_count` → "Cross-chain DEX activity"
+    - `chains_active_on` → "Blockchain networks used"
+    - `has_used_bridge` → "Cross-chain bridge experience"
+    - `net_flow_direction` → "Recent accumulation trend"
+    - Rationale: "lending" in DeFi terminology typically refers to lending-side supply, but the model measures borrowing behavior — "Borrowing protocol activity" is less ambiguous.
+- **Phase 7** — Documentation: architecture, pitch narrative, demo script, hackathon report. CHECKPOINT: final review before submission. (See Phase 6 note above — use display labels, not internal variable names, in all user-facing docs.)
 
 ## Confirmed Allium Table Paths
 

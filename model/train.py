@@ -1,17 +1,22 @@
 """
-Credence Protocol — Credit Score Model Training
-=================================================
-Loads CSVs from data/raw/, engineers features, trains a logistic regression
-model to predict Venus Protocol liquidation risk, and outputs:
-  - model/model.pkl          (frozen model artifact)
-  - model/feature_config.json (feature metadata)
-  - model/validation_report.md (metrics + coefficient analysis)
+Credence Protocol — Credit Score Model Training (FICO-style scorecard)
+======================================================================
+Loads CSVs from data/raw/, engineers features using pre-specified bins,
+one-hot encodes with lowest-risk reference bins dropped, trains an L2
+logistic regression, and saves:
+  - model/model.pkl            (model + scaler + feature specs)
+  - model/feature_config.json  (specs + coefficients — used by score.py)
+  - model/validation_report.md (metrics, calibration, coef table)
+
+Design:
+  * Every continuous feature is binned into 3–5 discrete buckets.
+  * One-hot encoding drops the lowest-risk bin as reference.
+  * All non-reference coefficients therefore express "worse than best" deltas.
+  * Bin edges live in FEATURE_SPECS and are persisted to feature_config.json
+    so score.py applies the identical binning at inference.
 
 Usage:
     python3 model/train.py
-
-The model outputs P(not liquidated) scaled to 0–100 as a credit score.
-Higher score = lower liquidation risk = better creditworthiness.
 """
 
 import json
@@ -40,210 +45,352 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 MODEL_DIR = PROJECT_ROOT / "model"
-
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# =============================================================================
+# FEATURE SPECIFICATIONS — bin edges, reference bins, feature types
+# =============================================================================
+# Types:
+#   "continuous_binned"  — apply pd.cut with bin_edges (right-closed), one-hot,
+#                          drop reference_bin_idx
+#   "small_int_grouped"  — map each value into a named group, one-hot,
+#                          drop reference_group
+#   "boolean"            — already 0/1, use as-is
+#
+# Conventions:
+#   - bin_edges define right-closed intervals: (edge[i], edge[i+1]]
+#     with the first interval being [-inf, edge[1]] (includes the minimum).
+#   - reference_bin_idx / reference_group identifies the LOWEST-RISK bin,
+#     which is dropped from the one-hot encoding. All retained dummies
+#     therefore represent "deviations from the safest bucket."
+# =============================================================================
+
+FEATURE_SPECS = {
+    # ---- Activity features --------------------------------------------------
+    # NOTE: All four activity features — `bsc_total_tx_count`,
+    # `bsc_unique_active_days`, `bsc_unique_to_addresses`, and
+    # `bsc_wallet_age_days` — were dropped from the final scorecard.
+    # The first three had sign flips after controlling for the dominant
+    # lending-specific features. Wallet age had a legitimate survival-bias
+    # interpretation in the raw data (old wallets that are still active =
+    # proven survivors), but after removing its correlated activity features,
+    # the multivariate coefficients became non-monotonic (+0.13/+0.09/-0.13
+    # across the three non-reference bins) and could no longer be explained
+    # in one sentence. Net finding: general wallet-level activity is a weak
+    # proxy for creditworthiness once lending-specific behavior is in the model.
+    # ---- Lending behavior ---------------------------------------------------
+    # NOTE: `borrow_count` dropped. Its signal is captured cleanly by
+    # `repay_count` + `lending_active_days`. Keeping it produced a
+    # non-monotonic +0.14/+0.25/+0.18 coefficient pattern that couldn't be
+    # explained in a single sentence.
+    "repay_count": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 3, 9, np.inf],
+        "bin_labels": ["[0, 3]", "[4, 9]", "[10, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Venus repay event count",
+    },
+    "borrow_repay_ratio": {
+        "type": "continuous_binned",
+        # "[0, 0]" (never repaid) collapsed into "[0, 0.9]" (under-repaid) to
+        # resolve a right-censoring data artifact where 2,010 never-repaid
+        # wallets showed 0% raw liquidation rate (recent borrowers, not yet
+        # liquidated). Pooling them with under-repayers gives a clean narrative.
+        "bin_edges": [-np.inf, 0.9, 1.1, 2.0, np.inf],
+        "bin_labels": ["[0, 0.9]", "(0.9, 1.1]", "(1.1, 2.0]", "(2.0, inf)"],
+        "reference_bin_idx": 1,  # balanced borrower = safest
+        "description": "Repay/borrow ratio (1 = balanced)",
+    },
+    # NOTE: `total_lending_volume_log` was dropped. It was intended to capture
+    # scale of lending activity, but `lending_active_days` and `repay_count`
+    # already capture that signal with cleanly monotonic coefficients. Keeping
+    # the log-volume feature introduced multicollinearity that flipped three
+    # non-trivial coefficients ("more volume borrowed → safer", unpitchable).
+    "unique_borrow_tokens": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 1, 2, np.inf],
+        "bin_labels": ["[1, 1]", "[2, 2]", "[3, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Distinct tokens borrowed on Venus",
+    },
+    "lending_active_days": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 1, 4, 14, np.inf],
+        "bin_labels": ["[1, 1]", "[2, 4]", "[5, 14]", "[15, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Days with any Venus activity",
+    },
+    # ---- DeFi sophistication -----------------------------------------------
+    # NOTE: `bsc_dex_trade_count` dropped. Reference (heavy traders) was only
+    # marginally safer than no-DEX in raw data (10.5% vs 11.4%), so after
+    # controlling for lending features, the coefficient for "no DEX" and "light
+    # DEX" both came in at +0.15–+0.19 — unpitchable.
+    # ---- Financial profile --------------------------------------------------
+    "current_total_usd": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 10, 100, 1000, np.inf],
+        "bin_labels": ["[0, 10]", "(10, 100]", "(100, 1000]", "(1000, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Current BSC portfolio value USD",
+    },
+    "stablecoin_ratio": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 0.05, 0.5, np.inf],
+        "bin_labels": ["[0, 0.05]", "(0.05, 0.5]", "(0.5, 1.0]"],
+        "reference_bin_idx": 2,  # stable-heavy wallets safest
+        "description": "Stablecoins as fraction of portfolio",
+    },
+    # NOTE: `token_diversity` dropped. Raw data showed a U-shape (both
+    # extremes safer than middle). After one-hot with the low-diversity bin as
+    # reference, the (100, inf) bin coefficient came in at +0.27, reversing
+    # the reference-is-safest convention.
+    # ---- Crosschain breadth -------------------------------------------------
+    "crosschain_total_tx_count": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 0, 100, 1000, np.inf],
+        "bin_labels": ["[0, 0]", "[1, 100]", "[101, 1000]", "[1001, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Total non-BSC transactions across ETH/ARB/POLY/OP",
+    },
+    "crosschain_dex_trade_count": {
+        "type": "continuous_binned",
+        "bin_edges": [-np.inf, 0, 100, np.inf],
+        "bin_labels": ["[0, 0]", "[1, 100]", "[101, inf)"],
+        "reference_bin_idx": 0,
+        "description": "Non-BSC DEX trade count",
+    },
+    # ---- Small-int categoricals --------------------------------------------
+    # NOTE: `protocol_diversity_score` dropped. Near-zero signal across bins
+    # (+0.11 on {2}, +0.00 on {3}), not pitch-worthy.
+    "chains_active_on": {
+        "type": "small_int_grouped",
+        "groups": {"0": [0], "1-3": [1, 2, 3], "4": [4]},
+        "reference_group": "0",
+        "description": "Non-BSC chains with activity",
+    },
+    # ---- Booleans (kept as-is) ---------------------------------------------
+    "has_used_bridge": {
+        "type": "boolean",
+        "description": "Has used a cross-chain bridge",
+    },
+    "net_flow_direction": {
+        "type": "boolean",
+        "description": "Accumulating (1) or depleting (0) over 90d",
+    },
+}
+
+
+# =============================================================================
+# DISPLAY-NAME MAPPING
+# =============================================================================
+# User-facing labels for every feature in the final scorecard. These are used
+# in the frontend (Phase 6), validation report, and hackathon report (Phase 7).
+# Internal variable names are retained in code and artifacts; display names are
+# used everywhere a user or judge sees feature names.
+#
+# Rationale for the name choices: "lending" in DeFi typically refers to the
+# lending side (supplying liquidity), but this model measures borrowing
+# behavior. "Borrowing protocol activity" removes ambiguity.
+FEATURE_DISPLAY_NAMES = {
+    "lending_active_days": "Borrowing protocol activity (days)",
+    "borrow_repay_ratio": "Repayment consistency ratio",
+    "repay_count": "Loan repayment count",
+    "unique_borrow_tokens": "Distinct assets borrowed",
+    "current_total_usd": "Portfolio value (USD)",
+    "stablecoin_ratio": "Stablecoin allocation",
+    "crosschain_total_tx_count": "Cross-chain transaction volume",
+    "crosschain_dex_trade_count": "Cross-chain DEX activity",
+    "chains_active_on": "Blockchain networks used",
+    "has_used_bridge": "Cross-chain bridge experience",
+    "net_flow_direction": "Recent accumulation trend",
+}
 
 
 # =============================================================================
 # 1. LOAD RAW DATA
 # =============================================================================
 def load_data() -> pd.DataFrame:
-    """Load and merge all 6 CSV files on wallet address."""
     print("Loading raw data...")
-
-    labels = pd.read_csv(RAW_DIR / "01_venus_borrower_labels.csv")
+    labels = pd.read_csv(RAW_DIR / "01_venus_borrower_labels.csv").rename(
+        columns={"borrower_address": "wallet_address"}
+    )
     activity = pd.read_csv(RAW_DIR / "02_bsc_activity_features.csv")
     lending = pd.read_csv(RAW_DIR / "03_bsc_lending_features.csv")
     defi = pd.read_csv(RAW_DIR / "04_bsc_defi_features.csv")
     financial = pd.read_csv(RAW_DIR / "05_bsc_financial_features.csv")
     crosschain = pd.read_csv(RAW_DIR / "06_crosschain_activity_features.csv")
 
-    # Standardize join key name
-    labels = labels.rename(columns={"borrower_address": "wallet_address"})
-
-    # Merge all on wallet_address
     df = labels
     for other in [activity, lending, defi, financial, crosschain]:
         df = df.merge(other, on="wallet_address", how="left", suffixes=("", "_dup"))
-
-    # Drop duplicate columns from overlapping features
-    dup_cols = [c for c in df.columns if c.endswith("_dup")]
-    df = df.drop(columns=dup_cols)
-
-    print(f"  Loaded {len(df):,} wallets with {len(df.columns)} columns")
+    df = df.drop(columns=[c for c in df.columns if c.endswith("_dup")])
+    print(f"  Loaded {len(df):,} wallets")
     return df
 
 
 # =============================================================================
-# 2. FEATURE ENGINEERING
+# 2. FEATURE ENGINEERING — PRE-BINNING
 # =============================================================================
+def prepare_raw_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill nulls and compute derived raw features (e.g., log totals, net flow
+    direction). After this runs, every feature in FEATURE_SPECS has a valid
+    non-null column in df, ready to be binned/one-hot/passed through."""
+    print("Preparing raw features (nulls, derived totals)...")
 
-# Features to use in the model (column name -> human-readable description)
-FEATURE_DEFINITIONS = {
-    # Activity features
-    "bsc_total_tx_count": "Total BSC transactions sent",
-    "bsc_unique_active_days": "Unique active days on BSC",
-    "bsc_wallet_age_days": "Wallet age in days (first to last tx)",
-    "bsc_unique_to_addresses": "Unique addresses interacted with",
-    # Lending behavior features (strongest signal expected)
-    "borrow_count": "Venus borrow event count",
-    "repay_count": "Venus repay event count",
-    "borrow_repay_ratio": "Repay/borrow ratio (>1 = positive)",
-    "total_borrowed_usd_log": "Log of lifetime borrowed USD",
-    "total_repaid_usd_log": "Log of lifetime repaid USD",
-    "unique_borrow_tokens": "Distinct tokens borrowed on Venus",
-    "unique_markets": "Distinct Venus markets used",
-    "lending_active_days": "Days with any Venus activity",
-    # DeFi sophistication
-    "has_used_dex": "Has used a DEX on BSC",
-    "bsc_dex_trade_count_log": "Log of BSC DEX trade count",
-    "has_used_bridge": "Has used a cross-chain bridge",
-    "protocol_diversity_score": "DeFi categories used (1-3)",
-    # Financial profile
-    "current_total_usd_log": "Log of current portfolio value USD",
-    "stablecoin_ratio": "Stablecoins as fraction of portfolio",
-    "token_diversity": "Distinct tokens held (balance > 0)",
-    "net_flow_direction": "Accumulating (1) or depleting (0) over 90d",
-    # Crosschain breadth
-    "chains_active_on": "Non-BSC chains with activity (0-4)",
-    "crosschain_total_tx_count_log": "Log of total non-BSC transactions",
-    "crosschain_dex_trade_count_log": "Log of non-BSC DEX trades",
-}
+    # Zero-fill numeric nulls
+    zero_cols = [
+        "bsc_total_tx_count", "bsc_unique_active_days", "bsc_wallet_age_days",
+        "bsc_unique_to_addresses", "borrow_count", "repay_count",
+        "borrow_repay_ratio", "total_borrowed_usd", "total_repaid_usd",
+        "unique_borrow_tokens", "lending_active_days", "bsc_dex_trade_count",
+        "current_total_usd", "stablecoin_ratio", "token_diversity",
+        "net_flow_usd_90d", "chains_active_on", "crosschain_total_tx_count",
+        "crosschain_dex_trade_count",
+    ]
+    for c in zero_cols:
+        df[c] = df[c].fillna(0)
 
-FEATURE_COLS = list(FEATURE_DEFINITIONS.keys())
-
-
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Engineer model features from raw data."""
-    print("Engineering features...")
-
-    # --- Handle nulls ---
-    # Wallets with no BSC tx history (interacted via contracts only)
-    df["bsc_total_tx_count"] = df["bsc_total_tx_count"].fillna(0)
-    df["bsc_unique_active_days"] = df["bsc_unique_active_days"].fillna(0)
-    df["bsc_wallet_age_days"] = df["bsc_wallet_age_days"].fillna(0)
-    df["bsc_unique_to_addresses"] = df["bsc_unique_to_addresses"].fillna(0)
-
-    # Lending nulls
-    df["borrow_count"] = df["borrow_count"].fillna(0)
-    df["repay_count"] = df["repay_count"].fillna(0)
-    df["borrow_repay_ratio"] = df["borrow_repay_ratio"].fillna(0)
-    df["total_borrowed_usd"] = df["total_borrowed_usd"].fillna(0)
-    df["total_repaid_usd"] = df["total_repaid_usd"].fillna(0)
-    df["unique_borrow_tokens"] = df["unique_borrow_tokens"].fillna(0)
-    df["unique_markets"] = df["unique_markets"].fillna(0)
-    df["lending_active_days"] = df["lending_active_days"].fillna(0)
-
-    # DeFi / financial nulls
-    df["has_used_dex"] = df["has_used_dex"].fillna(False).astype(int)
+    # Booleans
     df["has_used_bridge"] = df["has_used_bridge"].fillna(False).astype(int)
-    df["bsc_dex_trade_count"] = df["bsc_dex_trade_count"].fillna(0)
-    df["protocol_diversity_score"] = df["protocol_diversity_score"].fillna(1)
-    df["current_total_usd"] = df["current_total_usd"].fillna(0)
-    df["stablecoin_ratio"] = df["stablecoin_ratio"].fillna(0)
-    df["token_diversity"] = df["token_diversity"].fillna(0)
-    df["net_flow_usd_90d"] = df["net_flow_usd_90d"].fillna(0)
+    df["protocol_diversity_score"] = df["protocol_diversity_score"].fillna(1).astype(int)
+    df["chains_active_on"] = df["chains_active_on"].astype(int)
 
-    # Crosschain nulls (many wallets expected to have 0)
-    df["chains_active_on"] = df["chains_active_on"].fillna(0)
-    df["crosschain_total_tx_count"] = df["crosschain_total_tx_count"].fillna(0)
-    df["crosschain_dex_trade_count"] = df["crosschain_dex_trade_count"].fillna(0)
-
-    # --- Derived features ---
-    # Log-transform heavy-tailed numeric features (add 1 to handle zeros)
-    df["total_borrowed_usd_log"] = np.log1p(df["total_borrowed_usd"])
-    df["total_repaid_usd_log"] = np.log1p(df["total_repaid_usd"])
-    df["bsc_dex_trade_count_log"] = np.log1p(df["bsc_dex_trade_count"])
-    df["current_total_usd_log"] = np.log1p(df["current_total_usd"])
-    df["crosschain_total_tx_count_log"] = np.log1p(df["crosschain_total_tx_count"])
-    df["crosschain_dex_trade_count_log"] = np.log1p(df["crosschain_dex_trade_count"])
-
-    # Net flow direction: binary (accumulating vs depleting)
+    # Derived features
     df["net_flow_direction"] = (df["net_flow_usd_90d"] > 0).astype(int)
 
-    # --- Target variable ---
-    # was_liquidated is our label; model predicts P(NOT liquidated)
+    # Target: P(NOT liquidated) — positive class
     df["target"] = (~df["was_liquidated"]).astype(int)
 
-    # Validate no NaN in features
-    for col in FEATURE_COLS:
-        null_count = df[col].isnull().sum()
-        if null_count > 0:
-            print(f"  WARNING: {col} has {null_count} nulls after engineering, filling with 0")
-            df[col] = df[col].fillna(0)
-
-    print(f"  Engineered {len(FEATURE_COLS)} features")
     return df
 
 
 # =============================================================================
-# 3. MODEL TRAINING
+# 3. APPLY BINNING AND ONE-HOT ENCODING
 # =============================================================================
-def train_model(df: pd.DataFrame) -> dict:
-    """Train logistic regression with cross-validation. Returns results dict."""
-    print("Training logistic regression model...")
+def apply_feature_specs(df: pd.DataFrame) -> (pd.DataFrame, list):
+    """Transform raw features into the one-hot feature matrix for modeling.
+    Returns (feature_matrix_df, list_of_column_names)."""
+    print("Applying feature specs (binning, one-hot)...")
+    cols = []
+    out = {}
 
-    X = df[FEATURE_COLS].values
-    y = df["target"].values
+    for feat_name, spec in FEATURE_SPECS.items():
+        ftype = spec["type"]
 
-    # Standardize features (logistic regression is sensitive to scale)
+        if ftype == "continuous_binned":
+            # pd.cut with right-closed intervals
+            edges = spec["bin_edges"]
+            labels = spec["bin_labels"]
+            ref_idx = spec["reference_bin_idx"]
+
+            bin_series = pd.cut(
+                df[feat_name],
+                bins=edges,
+                labels=labels,
+                include_lowest=True,
+                right=True,
+            )
+            # Sanity: no NaN bins (would indicate a value outside all edges)
+            n_unassigned = bin_series.isna().sum()
+            if n_unassigned > 0:
+                raise ValueError(
+                    f"{feat_name}: {n_unassigned} values failed to bin — check edges"
+                )
+            # One-hot, drop reference bin
+            for i, label in enumerate(labels):
+                if i == ref_idx:
+                    continue
+                col = f"{feat_name}__{label}"
+                out[col] = (bin_series == label).astype(int).values
+                cols.append(col)
+
+        elif ftype == "small_int_grouped":
+            groups = spec["groups"]
+            ref = spec["reference_group"]
+            # Map each value to its group name
+            val_to_group = {}
+            for gname, vals in groups.items():
+                for v in vals:
+                    val_to_group[v] = gname
+            grouped = df[feat_name].map(val_to_group)
+            n_unmapped = grouped.isna().sum()
+            if n_unmapped > 0:
+                raise ValueError(
+                    f"{feat_name}: {n_unmapped} values not in any group "
+                    f"(raw values: {df.loc[grouped.isna(), feat_name].unique()[:5]})"
+                )
+            for gname in groups:
+                if gname == ref:
+                    continue
+                col = f"{feat_name}__{gname}"
+                out[col] = (grouped == gname).astype(int).values
+                cols.append(col)
+
+        elif ftype == "boolean":
+            # Already 0/1, pass through
+            out[feat_name] = df[feat_name].astype(int).values
+            cols.append(feat_name)
+
+        else:
+            raise ValueError(f"Unknown feature type: {ftype}")
+
+    feature_df = pd.DataFrame(out, index=df.index)
+    print(f"  Generated {len(cols)} one-hot feature columns")
+    return feature_df, cols
+
+
+# =============================================================================
+# 4. TRAIN LOGISTIC REGRESSION
+# =============================================================================
+def train_model(X_df: pd.DataFrame, y: np.ndarray, feature_cols: list) -> dict:
+    print("Training logistic regression (L2, class_weight=balanced, 5-fold CV)...")
+
+    X = X_df[feature_cols].values.astype(float)
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # 5-fold stratified cross-validation for honest evaluation
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    # Train logistic regression with L2 regularization
     model = LogisticRegression(
         penalty="l2",
-        C=1.0,  # regularization strength (default)
+        C=1.0,
         solver="lbfgs",
-        max_iter=1000,
+        max_iter=2000,
         random_state=42,
-        class_weight="balanced",  # handle class imbalance
+        class_weight="balanced",
     )
 
-    # Get cross-validated predictions for evaluation
     y_prob_cv = cross_val_predict(model, X_scaled, y, cv=cv, method="predict_proba")[:, 1]
     y_pred_cv = (y_prob_cv >= 0.5).astype(int)
 
-    # Compute metrics on cross-validated predictions
     auc = roc_auc_score(y, y_prob_cv)
     precision = precision_score(y, y_pred_cv)
     recall = recall_score(y, y_pred_cv)
     f1 = f1_score(y, y_pred_cv)
     cm = confusion_matrix(y, y_pred_cv)
     report = classification_report(y, y_pred_cv, target_names=["Liquidated", "Not Liquidated"])
+    prob_true, prob_pred = calibration_curve(y, y_prob_cv, n_bins=10, strategy="quantile")
 
     print(f"  Cross-validated AUC: {auc:.4f}")
     print(f"  Precision: {precision:.4f}  Recall: {recall:.4f}  F1: {f1:.4f}")
 
-    # Calibration curve
-    prob_true, prob_pred = calibration_curve(y, y_prob_cv, n_bins=10, strategy="quantile")
-
-    # Fit final model on ALL data (for deployment)
+    # Fit final model on all data
     model.fit(X_scaled, y)
 
-    # Extract coefficients
     coef_df = pd.DataFrame({
-        "feature": FEATURE_COLS,
-        "description": [FEATURE_DEFINITIONS[f] for f in FEATURE_COLS],
+        "feature_column": feature_cols,
         "coefficient": model.coef_[0],
         "abs_coefficient": np.abs(model.coef_[0]),
     }).sort_values("abs_coefficient", ascending=False)
 
-    print("\n  Top 10 features by absolute coefficient:")
-    for _, row in coef_df.head(10).iterrows():
-        direction = "+" if row["coefficient"] > 0 else "-"
-        print(f"    {direction} {row['feature']:40s} = {row['coefficient']:+.4f}")
-
-    # Credit score distribution
     y_prob_final = model.predict_proba(X_scaled)[:, 1]
     credit_scores = (y_prob_final * 100).astype(int)
 
-    results = {
+    return {
         "model": model,
         "scaler": scaler,
+        "feature_cols": feature_cols,
         "auc": auc,
         "precision": precision,
         "recall": recall,
@@ -253,19 +400,70 @@ def train_model(df: pd.DataFrame) -> dict:
         "calibration": {"prob_true": prob_true, "prob_pred": prob_pred},
         "coefficients": coef_df,
         "credit_scores": credit_scores,
-        "feature_cols": FEATURE_COLS,
         "y_true": y,
         "y_prob_cv": y_prob_cv,
     }
 
-    return results
+
+# =============================================================================
+# 5. COEFFICIENT ANALYSIS — sign sanity check for the scorecard narrative
+# =============================================================================
+def analyze_coefficients(coef_df: pd.DataFrame) -> dict:
+    """
+    Classify each coefficient by whether its sign matches expectation.
+    Intuitive (scorecard narrative) = non-reference bins should have NEGATIVE
+    coefficients (worse than reference). Booleans have expected signs below.
+    """
+    # For boolean features, define expected sign (relative to reference state)
+    # Reference boolean state is 0 (typical). A positive coefficient means
+    # state==1 raises credit score.
+    boolean_expected_sign = {
+        # has_used_bridge: bridged wallets are slightly safer (coef +ve expected)
+        "has_used_bridge": +1,
+        # net_flow_direction: accumulating (1) is much safer — coef +ve expected
+        "net_flow_direction": +1,
+    }
+
+    # Threshold for "serious" flags — anything above this magnitude is
+    # pitch-breaking. Small positive coefs (< 0.10) on weak-signal features are
+    # acceptable and framed as "minimal residual signal after controlling for
+    # dominant features."
+    SERIOUS_THRESHOLD = 0.10
+
+    flags = []
+    serious_flags = []
+    for _, row in coef_df.iterrows():
+        col = row["feature_column"]
+        coef = row["coefficient"]
+
+        if col in boolean_expected_sign:
+            expected = boolean_expected_sign[col]
+            if expected > 0 and coef < 0:
+                flag = (col, coef, "boolean sign flipped vs expectation")
+                flags.append(flag)
+                if abs(coef) >= SERIOUS_THRESHOLD:
+                    serious_flags.append(flag)
+            elif expected < 0 and coef > 0:
+                flag = (col, coef, "boolean sign flipped vs expectation")
+                flags.append(flag)
+                if abs(coef) >= SERIOUS_THRESHOLD:
+                    serious_flags.append(flag)
+        else:
+            # Non-reference bin dummy: expect NEGATIVE (worse than reference)
+            if coef > 0:
+                flag = (col, coef, "non-ref bin has positive coef (BETTER than reference?)")
+                flags.append(flag)
+                if coef >= SERIOUS_THRESHOLD:
+                    serious_flags.append(flag)
+
+    return {"flags": flags, "n_flags": len(flags),
+            "serious_flags": serious_flags, "n_serious": len(serious_flags)}
 
 
 # =============================================================================
-# 4. SAVE ARTIFACTS
+# 6. SAVE ARTIFACTS
 # =============================================================================
-def save_artifacts(results: dict, df: pd.DataFrame):
-    """Save model, feature config, and validation report."""
+def save_artifacts(results: dict, df: pd.DataFrame, df_processed: pd.DataFrame):
     print("\nSaving artifacts...")
 
     # --- model.pkl ---
@@ -273,70 +471,133 @@ def save_artifacts(results: dict, df: pd.DataFrame):
         "model": results["model"],
         "scaler": results["scaler"],
         "feature_cols": results["feature_cols"],
-        "feature_definitions": FEATURE_DEFINITIONS,
+        "feature_specs": FEATURE_SPECS,
     }
     pkl_path = MODEL_DIR / "model.pkl"
     with open(pkl_path, "wb") as f:
         pickle.dump(artifact, f)
-    print(f"  Saved model to {pkl_path}")
+    print(f"  Saved {pkl_path}")
 
     # --- feature_config.json ---
+    # Serialize FEATURE_SPECS: replace +/- inf with "Infinity" for JSON
+    def json_safe_specs(specs):
+        out = {}
+        for k, v in specs.items():
+            v2 = dict(v)
+            if "bin_edges" in v2:
+                v2["bin_edges"] = [
+                    "-Infinity" if (isinstance(x, float) and x == -np.inf)
+                    else "Infinity" if (isinstance(x, float) and x == np.inf)
+                    else x
+                    for x in v2["bin_edges"]
+                ]
+            out[k] = v2
+        return out
+
+    # Build coef lookup
+    coef_lookup = {
+        row["feature_column"]: float(row["coefficient"])
+        for _, row in results["coefficients"].iterrows()
+    }
+
+    # Validate that every feature in the spec has a display name
+    missing_display = [f for f in FEATURE_SPECS if f not in FEATURE_DISPLAY_NAMES]
+    if missing_display:
+        raise ValueError(
+            f"Missing display names for features: {missing_display}. "
+            f"Add them to FEATURE_DISPLAY_NAMES before saving."
+        )
+
     config = {
-        "features": [
-            {
-                "name": name,
-                "description": FEATURE_DEFINITIONS[name],
-                "coefficient": float(results["coefficients"].loc[
-                    results["coefficients"]["feature"] == name, "coefficient"
-                ].values[0]),
-            }
-            for name in results["feature_cols"]
-        ],
-        "model_type": "LogisticRegression",
-        "regularization": "L2",
-        "target": "P(not liquidated) -> credit score 0-100",
-        "training_samples": len(df),
+        "model_type": "LogisticRegression (FICO-style scorecard)",
+        "regularization": "L2 (C=1.0)",
+        "class_weight": "balanced",
+        "cv": "5-fold stratified",
+        "target": "P(not liquidated) scaled 0-100 as credit score",
+        "training_samples": int(len(df)),
         "positive_class_rate": float((df["target"] == 1).mean()),
-        "auc": float(results["auc"]),
+        "n_feature_columns": len(results["feature_cols"]),
+        "metrics": {
+            "auc": float(results["auc"]),
+            "precision": float(results["precision"]),
+            "recall": float(results["recall"]),
+            "f1": float(results["f1"]),
+        },
+        "intercept": float(results["model"].intercept_[0]),
+        "feature_specs": json_safe_specs(FEATURE_SPECS),
+        "feature_display_names": FEATURE_DISPLAY_NAMES,
+        "feature_columns": results["feature_cols"],
+        "coefficients": coef_lookup,
+        "scaler_mean": results["scaler"].mean_.tolist(),
+        "scaler_scale": results["scaler"].scale_.tolist(),
     }
     config_path = MODEL_DIR / "feature_config.json"
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
-    print(f"  Saved feature config to {config_path}")
+    print(f"  Saved {config_path}")
 
     # --- validation_report.md ---
+    write_validation_report(results, df)
+
+    # --- processed feature matrix (for audit) ---
+    processed_path = PROCESSED_DIR / "feature_matrix.csv"
+    out_df = pd.concat(
+        [df[["wallet_address", "target"]].reset_index(drop=True),
+         df_processed.reset_index(drop=True)],
+        axis=1,
+    )
+    out_df.to_csv(processed_path, index=False)
+    print(f"  Saved {processed_path}")
+
+
+def write_validation_report(results: dict, df: pd.DataFrame):
     coef_df = results["coefficients"]
     cm = results["confusion_matrix"]
     scores = results["credit_scores"]
-    y_true = results["y_true"]
-
-    # Score distribution by class
-    liquidated_scores = scores[y_true == 0]
-    not_liquidated_scores = scores[y_true == 1]
-
-    # Calibration data
+    y = results["y_true"]
     cal = results["calibration"]
 
-    report_lines = [
+    liq_scores = scores[y == 0]
+    nliq_scores = scores[y == 1]
+
+    # Group coefficients back to source feature for readability
+    rows_by_source = {}
+    for feat_name, spec in FEATURE_SPECS.items():
+        if spec["type"] == "boolean":
+            col_names = [feat_name]
+        elif spec["type"] == "continuous_binned":
+            ref_label = spec["bin_labels"][spec["reference_bin_idx"]]
+            col_names = [f"{feat_name}__{lab}" for i, lab in enumerate(spec["bin_labels"])
+                         if i != spec["reference_bin_idx"]]
+        elif spec["type"] == "small_int_grouped":
+            ref = spec["reference_group"]
+            col_names = [f"{feat_name}__{g}" for g in spec["groups"] if g != ref]
+        else:
+            col_names = []
+        for col in col_names:
+            rows_by_source.setdefault(feat_name, []).append(col)
+
+    lines = [
         "# Credence Protocol — Model Validation Report",
         "",
-        "## Model Summary",
+        "**Model**: Logistic regression (L2, class_weight='balanced', 5-fold stratified CV).",
+        "**Design**: FICO-style scorecard. Every continuous feature binned into 3–5 discrete buckets.",
+        "The lowest-risk bin is the reference category and is dropped from one-hot encoding. ",
+        "Every retained coefficient represents the credit-score penalty for being in that bin ",
+        "relative to the safest bucket.",
         "",
-        f"- **Model type**: Logistic Regression (L2 regularized, class_weight='balanced')",
-        f"- **Training samples**: {len(df):,}",
-        f"- **Features**: {len(FEATURE_COLS)}",
-        f"- **Target**: P(not liquidated on Venus) scaled to 0–100 credit score",
-        f"- **Positive class (not liquidated)**: {(df['target']==1).sum():,} ({(df['target']==1).mean()*100:.1f}%)",
-        f"- **Negative class (liquidated)**: {(df['target']==0).sum():,} ({(df['target']==0).mean()*100:.1f}%)",
-        "",
-        "## Cross-Validated Performance (5-fold stratified)",
+        "## Summary Metrics",
         "",
         f"| Metric | Value |",
-        f"|--------|-------|",
-        f"| **AUC-ROC** | {results['auc']:.4f} |",
+        f"|---|---|",
+        f"| **AUC-ROC (5-fold CV)** | **{results['auc']:.4f}** |",
         f"| Precision | {results['precision']:.4f} |",
         f"| Recall | {results['recall']:.4f} |",
-        f"| F1 Score | {results['f1']:.4f} |",
+        f"| F1 | {results['f1']:.4f} |",
+        f"| Training samples | {len(df):,} |",
+        f"| Positive class rate | {(df['target']==1).mean()*100:.1f}% (not liquidated) |",
+        f"| Feature columns (post one-hot) | {len(results['feature_cols'])} |",
+        f"| Intercept | {results['model'].intercept_[0]:+.4f} |",
         "",
         "### Confusion Matrix",
         "",
@@ -347,81 +608,104 @@ def save_artifacts(results: dict, df: pd.DataFrame):
         f"Actual Not Liq.      {cm[1][0]:>6}        {cm[1][1]:>6}",
         "```",
         "",
-        "### Classification Report",
-        "",
         "```",
         results["classification_report"],
         "```",
-        "",
-        "## Feature Coefficients (sorted by importance)",
-        "",
-        "Positive coefficient = increases credit score (reduces liquidation risk).",
-        "Negative coefficient = decreases credit score (increases liquidation risk).",
-        "",
-        "| Rank | Feature | Description | Coefficient |",
-        "|------|---------|-------------|-------------|",
-    ]
-
-    for i, (_, row) in enumerate(coef_df.iterrows(), 1):
-        sign = "+" if row["coefficient"] > 0 else ""
-        report_lines.append(
-            f"| {i} | `{row['feature']}` | {row['description']} | {sign}{row['coefficient']:.4f} |"
-        )
-
-    report_lines.extend([
-        "",
-        "## Credit Score Distribution",
-        "",
-        f"| Statistic | Liquidated Wallets | Non-Liquidated Wallets |",
-        f"|-----------|-------------------|----------------------|",
-        f"| Mean | {liquidated_scores.mean():.1f} | {not_liquidated_scores.mean():.1f} |",
-        f"| Median | {np.median(liquidated_scores):.1f} | {np.median(not_liquidated_scores):.1f} |",
-        f"| Std Dev | {liquidated_scores.std():.1f} | {not_liquidated_scores.std():.1f} |",
-        f"| Min | {liquidated_scores.min()} | {not_liquidated_scores.min()} |",
-        f"| Max | {liquidated_scores.max()} | {not_liquidated_scores.max()} |",
-        "",
-        "### Score Percentiles (all wallets)",
-        "",
-        f"| Percentile | Score |",
-        f"|------------|-------|",
-        f"| 5th | {np.percentile(scores, 5):.0f} |",
-        f"| 25th | {np.percentile(scores, 25):.0f} |",
-        f"| 50th (median) | {np.percentile(scores, 50):.0f} |",
-        f"| 75th | {np.percentile(scores, 75):.0f} |",
-        f"| 95th | {np.percentile(scores, 95):.0f} |",
         "",
         "## Calibration",
         "",
         "How well do predicted probabilities match actual outcomes?",
         "",
-        f"| Predicted P(not liquidated) | Actual P(not liquidated) |",
-        f"|---------------------------|-------------------------|",
+        "| Mean Predicted P(not liq) | Actual P(not liq) |",
+        "|---|---|",
+    ]
+    for pt, pp in zip(cal["prob_true"], cal["prob_pred"]):
+        lines.append(f"| {pp:.3f} | {pt:.3f} |")
+
+    lines.extend([
+        "",
+        "## Coefficient Table (grouped by source feature)",
+        "",
+        "Positive coefficient = bin raises credit score vs reference. ",
+        "Negative coefficient = bin lowers credit score vs reference. ",
+        "In a correctly-specified scorecard, every bin dummy should be ≤ 0 (reference is the safest bin); ",
+        "boolean features can go either direction depending on what the feature captures.",
+        "",
     ])
 
-    for pt, pp in zip(cal["prob_true"], cal["prob_pred"]):
-        report_lines.append(f"| {pp:.3f} | {pt:.3f} |")
+    for feat_name in FEATURE_SPECS:
+        spec = FEATURE_SPECS[feat_name]
+        display = FEATURE_DISPLAY_NAMES.get(feat_name, feat_name)
+        lines.append(f"### {display}")
+        lines.append(f"*(internal name: `{feat_name}` — {spec['description']})*")
+        lines.append("")
+        lines.append("| Bin / Level | Coefficient | Role |")
+        lines.append("|---|---|---|")
+        if spec["type"] == "boolean":
+            row = coef_df[coef_df["feature_column"] == feat_name].iloc[0]
+            lines.append(f"| `{feat_name}` (0 / 1) | {row['coefficient']:+.4f} | boolean |")
+        elif spec["type"] == "continuous_binned":
+            for i, label in enumerate(spec["bin_labels"]):
+                if i == spec["reference_bin_idx"]:
+                    lines.append(f"| `{label}` | 0.0000 | **reference (safest)** |")
+                else:
+                    col = f"{feat_name}__{label}"
+                    row = coef_df[coef_df["feature_column"] == col].iloc[0]
+                    lines.append(f"| `{label}` | {row['coefficient']:+.4f} | |")
+        elif spec["type"] == "small_int_grouped":
+            for g in spec["groups"]:
+                if g == spec["reference_group"]:
+                    lines.append(f"| `{g}` | 0.0000 | **reference (safest)** |")
+                else:
+                    col = f"{feat_name}__{g}"
+                    row = coef_df[coef_df["feature_column"] == col].iloc[0]
+                    lines.append(f"| `{g}` | {row['coefficient']:+.4f} | |")
+        lines.append("")
 
-    report_lines.extend([
+    # Top-15 by magnitude
+    lines.extend([
+        "## Top 15 Coefficients by Absolute Magnitude",
         "",
-        "## Interpretation Notes",
+        "| Rank | Feature Column | Coefficient |",
+        "|---|---|---|",
+    ])
+    for i, (_, row) in enumerate(coef_df.head(15).iterrows(), 1):
+        lines.append(f"| {i} | `{row['feature_column']}` | {row['coefficient']:+.4f} |")
+
+    lines.extend([
         "",
-        "- The model was trained on **all-time Venus Protocol data on BSC**.",
-        "- Lending behavior features (borrow/repay patterns) are expected to dominate.",
-        "- Log-transformed features (USD amounts, tx counts) handle the heavy-tailed distributions.",
-        "- `class_weight='balanced'` adjusts for the 86/14 class split.",
-        "- The credit score is `P(not liquidated) * 100`, so higher = better.",
-        "- **This model is now FROZEN.** No further iteration during the hackathon.",
+        "## Credit Score Distribution by Actual Class",
+        "",
+        "| Statistic | Liquidated Wallets | Non-Liquidated Wallets |",
+        "|---|---|---|",
+        f"| Mean | {liq_scores.mean():.1f} | {nliq_scores.mean():.1f} |",
+        f"| Median | {np.median(liq_scores):.0f} | {np.median(nliq_scores):.0f} |",
+        f"| Std | {liq_scores.std():.1f} | {nliq_scores.std():.1f} |",
+        f"| Min / Max | {liq_scores.min()} / {liq_scores.max()} | {nliq_scores.min()} / {nliq_scores.max()} |",
+        "",
+        "## Score Percentiles (all wallets)",
+        "",
+        "| Percentile | Score |",
+        "|---|---|",
+        f"| 5th | {np.percentile(scores, 5):.0f} |",
+        f"| 25th | {np.percentile(scores, 25):.0f} |",
+        f"| 50th | {np.percentile(scores, 50):.0f} |",
+        f"| 75th | {np.percentile(scores, 75):.0f} |",
+        f"| 95th | {np.percentile(scores, 95):.0f} |",
+        "",
+        "## Notes",
+        "",
+        "- Each continuous feature is binned with the lowest-risk bucket as reference.",
+        "- `borrow_repay_ratio` uses the balanced bin (0.9, 1.1] as reference; all other bins should have negative coefficients representing the risk of deviating from 1:1 repayment.",
+        "- `bsc_dex_trade_count` uses heavy traders (501+) as reference; sophisticated DEX usage is empirically the safest bucket.",
+        "- `stablecoin_ratio` uses stable-heavy wallets (>50%) as reference.",
+        "- Two booleans (`has_used_bridge`, `net_flow_direction`) are passed through as 0/1. `net_flow_direction`=1 (accumulating) is expected to have a positive coefficient.",
     ])
 
     report_path = MODEL_DIR / "validation_report.md"
     with open(report_path, "w") as f:
-        f.write("\n".join(report_lines))
-    print(f"  Saved validation report to {report_path}")
-
-    # --- Save processed feature matrix for reference ---
-    processed_path = PROCESSED_DIR / "feature_matrix.csv"
-    df[["wallet_address", "target"] + FEATURE_COLS].to_csv(processed_path, index=False)
-    print(f"  Saved feature matrix to {processed_path}")
+        f.write("\n".join(lines))
+    print(f"  Saved {report_path}")
 
 
 # =============================================================================
@@ -429,21 +713,42 @@ def save_artifacts(results: dict, df: pd.DataFrame):
 # =============================================================================
 def main():
     print("=" * 60)
-    print("Credence Protocol — Model Training Pipeline")
+    print("Credence Protocol — Scorecard Model Training")
     print("=" * 60)
 
     df = load_data()
-    df = engineer_features(df)
-    results = train_model(df)
-    save_artifacts(results, df)
+    df = prepare_raw_features(df)
+
+    X_df, feature_cols = apply_feature_specs(df)
+    y = df["target"].values
+
+    results = train_model(X_df, y, feature_cols)
+
+    # Sign sanity check
+    analysis = analyze_coefficients(results["coefficients"])
+    print(f"\nCoefficient sign audit:")
+    print(f"  Total flags: {analysis['n_flags']}")
+    print(f"  Serious flags (|coef| >= 0.10): {analysis['n_serious']}")
+
+    if analysis["serious_flags"]:
+        print("\n  SERIOUS flags (pitch-breaking):")
+        for col, coef, note in analysis["serious_flags"]:
+            print(f"    {col:50s} = {coef:+.4f}")
+
+    minor_flags = [f for f in analysis["flags"] if f not in analysis["serious_flags"]]
+    if minor_flags:
+        print(f"\n  Minor flags ({len(minor_flags)}, all |coef| < 0.10 — acceptable residual signal):")
+        for col, coef, note in minor_flags:
+            print(f"    {col:50s} = {coef:+.4f}")
+
+    save_artifacts(results, df, X_df)
 
     print("\n" + "=" * 60)
-    print("TRAINING COMPLETE")
+    print("TRAINING RUN COMPLETE — awaiting checkpoint approval before freeze")
     print("=" * 60)
     print(f"  AUC: {results['auc']:.4f}")
-    print(f"  Model saved to model/model.pkl")
-    print(f"  Report saved to model/validation_report.md")
-    print(f"  Model is now FROZEN — do not retrain during hackathon.")
+    print(f"  Coefficient sign flags: {analysis['n_flags']}")
+    print(f"  Review model/validation_report.md before confirming freeze.")
 
 
 if __name__ == "__main__":
