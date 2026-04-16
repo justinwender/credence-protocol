@@ -109,13 +109,42 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
 - **Phase 2** ✅ — SQL queries written + executed via Allium Explorer API. All 6 CSVs in `data/raw/` with 115,687 rows each. Venus project name = `venus_finance`.
 - **Phase 3** ✅ — FICO-style scorecard model trained and frozen. Final: L2 logit, 10 features → 24 one-hot columns, AUC 0.8182, 0 serious sign flags. Artifacts: `model/model.pkl`, `model/feature_config.json` (includes bin edges, coefficients, display names, scaler params), `model/score.py` (inference), `model/validation_report.md` (coefficient table with display names). DO NOT RETRAIN.
 - **Phase 4** — Smart contracts + tests in Foundry. CHECKPOINT 4a: user reviews compiled interfaces + interaction flow. Deploy to BSC testnet. CHECKPOINT 4b: user reviews deployed addresses + test tx.
-  - **Phase 4 design note — `CreditOracle.getCompositeScore` onchain-only cap**:
-    - When `hasOffchainAttestation == false`, the composite score must be capped:
+  - **Phase 4 design note — `CreditOracle` composite math (asymmetric: offchain-baseline + onchain-boost)**:
+    - The composite uses different logic in each case, reflecting the protocol's value proposition.
+    - **Onchain-only (no attestation)** — thin-file cap:
       `compositeScore = (onchainScore * onchainOnlyMultiplier) / 100`
-    - `onchainOnlyMultiplier` is a configurable `uint8` state variable, admin-settable, default `50` (i.e., 0.50x).
-    - This means the best onchain-only wallet (raw score 100) maps to composite 50 → ~110–115% collateral.
-    - Rationale (include as a comment in the contract): the onchain model alone is a narrow view of financial life. Undercollateralized lending (<100%) requires a verified offchain attestation — this is the protocol's core value proposition.
-    - When both onchain and offchain are present, apply the configurable weighted blend (no cap).
+      Default `onchainOnlyMultiplier = 50`. Max composite in this case = 50, maps to ~120% collateral. Onchain alone cannot unlock undercollateralized terms.
+    - **With attestation** — offchain baseline, onchain boost:
+      `baseline = (offchainScore * offchainBaselineMultiplier) / 100`
+      `boost = (onchainScore * onchainBoostMultiplier) / 100`
+      `compositeScore = min(100, baseline + boost)`
+      Defaults: `offchainBaselineMultiplier = 70`, `onchainBoostMultiplier = 40`.
+    - All four multipliers are configurable `uint8` state variables, admin-settable.
+    - **Value-prop framing for the contract comment block** (verbatim target for `CreditOracle.sol`):
+      * Onchain-only: better-than-standard-DeFi terms (~120% max), but still overcollateralized — a high thin-file score is not equivalent to genuine creditworthiness.
+      * Offchain-only (strong FICO): competitive with traditional bank lending, maybe slightly worse (~110% collateral) — verified offchain creditworthiness earns bank-tier terms.
+      * Offchain + strong onchain: genuinely better than a bank could offer (undercollateralized, 75–90%) — the onchain signal lifts above the bank baseline.
+      * Value proposition: bringing offchain credit data onchain via ZK proofs unlocks undercollateralized lending, which has not yet been solved in DeFi. Two independent verified signals compound; onchain alone is insufficient because a thin onchain file (high score from minimal exposure) is not equivalent to proven creditworthiness.
+  - **Phase 4 design note — Persistent credit identity across wallets (Sybil-resistant)**:
+    - `OffchainAttestationRegistry` adds a `bytes32 identityHash` field to each attestation. In production, this hash is derived deterministically from the ZK proof (same offchain identity → same hash, regardless of which wallet submits the proof). Admin-set in the demo.
+    - Registry tracks three additional mappings:
+      * `_historicalOnchainScores: identityHash => uint8` — persistent per-identity onchain score, survives wallet rebinding.
+      * `_identityToCurrentWallet: identityHash => address` — which wallet currently holds this identity.
+      * `_walletToIdentity: address => identityHash` — reverse lookup.
+    - `setAttestation(wallet, attestation)` behavior:
+      * If `identityHash` is already bound to a different wallet → **rebinding**: clear the old wallet's attestation, preserve `_historicalOnchainScores[identityHash]`, bind identity to new wallet. Emit `AttestationTransferred(oldWallet, newWallet, identityHash, inheritedScore)`.
+      * If `identityHash` is new → first-time attestation, no historical score to inherit.
+    - New function `updateHistoricalScore(identityHash, score)` — callable **only by the CreditOracle** (not `onlyOwner`). The Oracle calls this inside `setOnchainScore` whenever the target wallet has an attestation, keeping the persistent record in sync.
+    - New view `getHistoricalScore(identityHash) → uint8` read by the Oracle during composite calculation.
+    - `CreditOracle.getCompositeScore(wallet)` change: when the wallet has an attestation AND its own `_onchainScores[wallet] == 0` AND registry has a non-zero historical score for its identity → use the historical score as the onchain input. This means a user who was liquidated on wallet A (low score), rebinds their attestation to wallet B (fresh wallet, no score), gets B's composite calculated using A's old score — not a fresh start.
+    - `CreditOracle.setOnchainScore(wallet, score, chainsUsed)` change: if the wallet has an attestation, also call `registry.updateHistoricalScore(identityHash, score)` to keep the persistent record current.
+    - **Deployment order implication**: Registry deploys first with no oracle address, then Oracle deploys with Registry address, then admin calls `Registry.setCreditOracle(oracleAddr)` once to authorize the Oracle. `setCreditOracle` can only be called when the current value is `address(0)` (one-shot, immutable after).
+    - **NOT implemented (production considerations, documented in hackathon report)**:
+      * Handling of active loans on the old wallet when attestation transfers (production: force repay, freeze old loan, or transfer debt).
+      * Rebinding cooldowns (ZKredit handles at proof layer).
+      * Privacy of identity hashes beyond the primitive `bytes32` (production: commit-reveal or Poseidon hashes).
+    - **LendingPool is untouched** by this feature — it still reads composite scores via `oracle.getCompositeScore(wallet)`. All identity-persistence logic lives in Registry + Oracle.
+    - **Demo beat #4** (after search → attestation → combined): "What if this user creates a new wallet?" Submit attestation for fresh wallet B with the same identity hash as wallet A. Show B's composite inherits A's onchain score. 30-second addition illustrating Sybil resistance.
   - **Phase 4 design note — thin-file problem motivates the cap**:
     - The Phase 3 scorecard's dominant feature is `lending_active_days`. Reference (safest) = [1, 1] — i.e., a single day of lending activity.
     - Mechanical consequence: a wallet that borrowed once, repaid once, and moved on can score ~98 (see `model/examples/ideal_wallet.json`). Its low liquidation risk is real (no ongoing exposure), but its creditworthiness signal is thin.
@@ -139,6 +168,20 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
     - `net_flow_direction` → "Recent accumulation trend"
     - Rationale: "lending" in DeFi terminology typically refers to lending-side supply, but the model measures borrowing behavior — "Borrowing protocol activity" is less ambiguous.
 - **Phase 7** — Documentation: architecture, pitch narrative, demo script, hackathon report. CHECKPOINT: final review before submission. (See Phase 6 note above — use display labels, not internal variable names, in all user-facing docs.)
+  - **Phase 7 narrative note — Bidirectional credit identity (full vision)**:
+    - The identity-persistence mechanism implemented in Phase 4 is a one-directional primitive: offchain identity anchors onchain reputation.
+    - The full vision is bidirectional: onchain behavior also feeds back into the offchain credit profile, creating a unified credit record spanning wallets and protocols.
+    - Over time, this produces a portable, unforgeable credit identity that:
+      * Spans multiple wallets (rebinding preserves the identity's accumulated score)
+      * Accumulates reputation across activity (new behavior updates the persistent record)
+      * Survives wallet turnover (Sybil attacks don't work — identity anchored to offchain account)
+      * Enables true undercollateralized DeFi at scale (track record can't be gamed by creating new wallets)
+    - Include this vision in the architecture section of `docs/hackathon_report.md` and frame the submitted demo as the first primitive step toward this picture.
+  - **Phase 7 production-considerations note — FICO mapping is linear for the hackathon**:
+    - `CreditOracle.mapFicoToZero100` linearly maps FICO 300–850 to 0–100, so 575 (midpoint of range) → 50 and 300 → 0.
+    - In practice almost no DeFi borrower has a FICO under ~500, so the bottom third of the mapping is dead space.
+    - Production: replace with a nonlinear mapping that concentrates resolution in the 600–800 range where actual lending decisions cluster. A piecewise-linear or sigmoid-shaped mapping would be appropriate.
+    - Include this in the "production considerations" section of `docs/hackathon_report.md`.
 
 ## Confirmed Allium Table Paths
 

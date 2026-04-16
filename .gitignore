@@ -28,6 +28,8 @@ frontend/.env
 # Foundry
 contracts/out/
 contracts/cache/
+contracts/lib/
+contracts/broadcast/
 
 # OS
 .DS_Store
