@@ -107,7 +107,7 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
 - **Phase 0** ✅ — Setup: CLAUDE.md, initial structure, tech decisions locked.
 - **Phase 1** ✅ — Allium schema discovery (via Claude-in-Chrome docs browsing). Confirmed table paths below.
 - **Phase 2** ✅ — SQL queries written + executed via Allium Explorer API. All 6 CSVs in `data/raw/` with 115,687 rows each. Venus project name = `venus_finance`.
-- **Phase 3** 🚧 — Feature engineering + logit training in `model/train.py`. Output validation metrics, coefficient report. CHECKPOINT: user reviews metrics, confirms model to freeze.
+- **Phase 3** ✅ — FICO-style scorecard model trained and frozen. Final: L2 logit, 10 features → 24 one-hot columns, AUC 0.8182, 0 serious sign flags. Artifacts: `model/model.pkl`, `model/feature_config.json` (includes bin edges, coefficients, display names, scaler params), `model/score.py` (inference), `model/validation_report.md` (coefficient table with display names). DO NOT RETRAIN.
 - **Phase 4** — Smart contracts + tests in Foundry. CHECKPOINT 4a: user reviews compiled interfaces + interaction flow. Deploy to BSC testnet. CHECKPOINT 4b: user reviews deployed addresses + test tx.
   - **Phase 4 design note — `CreditOracle.getCompositeScore` onchain-only cap**:
     - When `hasOffchainAttestation == false`, the composite score must be capped:
@@ -116,6 +116,13 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
     - This means the best onchain-only wallet (raw score 100) maps to composite 50 → ~110–115% collateral.
     - Rationale (include as a comment in the contract): the onchain model alone is a narrow view of financial life. Undercollateralized lending (<100%) requires a verified offchain attestation — this is the protocol's core value proposition.
     - When both onchain and offchain are present, apply the configurable weighted blend (no cap).
+  - **Phase 4 design note — thin-file problem motivates the cap**:
+    - The Phase 3 scorecard's dominant feature is `lending_active_days`. Reference (safest) = [1, 1] — i.e., a single day of lending activity.
+    - Mechanical consequence: a wallet that borrowed once, repaid once, and moved on can score ~98 (see `model/examples/ideal_wallet.json`). Its low liquidation risk is real (no ongoing exposure), but its creditworthiness signal is thin.
+    - Analogous to a FICO "thin file": high score achieved through minimal activity is not equivalent to a high score earned through extensive, well-managed exposure.
+    - The onchain-only composite cap resolves this: raw onchain 98 → capped composite 49 → ~110% collateral. The wallet gets slight benefit over standard DeFi (150%), but can't access undercollateralized terms without offchain attestation proving genuine creditworthiness.
+    - Pitch framing: "A thin onchain history can produce a high score because minimal exposure implies minimal risk. But thin-file wallets shouldn't receive institutional-grade lending terms. The offchain attestation is what differentiates 'safe because inexperienced' from 'safe because genuinely creditworthy.' This is why the protocol requires both sources to unlock sub-100% collateral — two independent positive signals reduce uncertainty in ways either signal alone cannot."
+    - Include this reasoning as a comment block in `CreditOracle.sol` above `getCompositeScore`.
 - **Phase 5** — Scoring pipeline (`pipeline/`). Decide Wallet-API vs per-chain approach. CHECKPOINT: score a test wallet end-to-end, show output.
 - **Phase 6** — Frontend. CHECKPOINT: walk through full demo flow end-to-end.
   - **User-facing feature labels (Phase 6 + Phase 7)**: everywhere a feature name is shown to the user or judge (factor breakdown component, ScoreGauge tooltips, validation report, hackathon report), use the display labels below — NOT the internal variable names. Internal names remain in the code, model artifacts, and `feature_config.json`. Display labels are also stored in `feature_config.json.feature_display_names` so they're the single source of truth.
