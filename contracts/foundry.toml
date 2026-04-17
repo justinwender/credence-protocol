@@ -17,5 +17,7 @@ remappings = [
 [rpc_endpoints]
 bsc_testnet = "${BSC_TESTNET_RPC}"
 
+# Etherscan V2 unified API: one key across all chains. chain 97 = BSC testnet.
+# Forge resolves this via the `chain` field and routes to the V2 endpoint.
 [etherscan]
-bsc_testnet = { key = "${BSCSCAN_API_KEY}", url = "https://api-testnet.bscscan.com/api", chain = 97 }
+bsc_testnet = { key = "${ETHERSCAN_API_KEY}", chain = 97 }
