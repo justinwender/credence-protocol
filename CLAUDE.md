@@ -108,7 +108,7 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
 - **Phase 1** ✅ — Allium schema discovery (via Claude-in-Chrome docs browsing). Confirmed table paths below.
 - **Phase 2** ✅ — SQL queries written + executed via Allium Explorer API. All 6 CSVs in `data/raw/` with 115,687 rows each. Venus project name = `venus_finance`.
 - **Phase 3** ✅ — FICO-style scorecard model trained and frozen. Final: L2 logit, 10 features → 24 one-hot columns, AUC 0.8182, 0 serious sign flags. Artifacts: `model/model.pkl`, `model/feature_config.json` (includes bin edges, coefficients, display names, scaler params), `model/score.py` (inference), `model/validation_report.md` (coefficient table with display names). DO NOT RETRAIN.
-- **Phase 4** — Smart contracts + tests in Foundry. CHECKPOINT 4a: user reviews compiled interfaces + interaction flow. Deploy to BSC testnet. CHECKPOINT 4b: user reviews deployed addresses + test tx.
+- **Phase 4** ✅ — Smart contracts + tests in Foundry (79 tests, 99.5% line coverage). Deployed + verified on BSC testnet. Demo tx confirmed on-chain (composite 49→99, collateral 121%→75.7%). Addresses in `.env`.
   - **Phase 4 design note — `CreditOracle` composite math (asymmetric: offchain-baseline + onchain-boost)**:
     - The composite uses different logic in each case, reflecting the protocol's value proposition.
     - **Onchain-only (no attestation)** — thin-file cap:
@@ -152,7 +152,7 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
     - The onchain-only composite cap resolves this: raw onchain 98 → capped composite 49 → ~110% collateral. The wallet gets slight benefit over standard DeFi (150%), but can't access undercollateralized terms without offchain attestation proving genuine creditworthiness.
     - Pitch framing: "A thin onchain history can produce a high score because minimal exposure implies minimal risk. But thin-file wallets shouldn't receive institutional-grade lending terms. The offchain attestation is what differentiates 'safe because inexperienced' from 'safe because genuinely creditworthy.' This is why the protocol requires both sources to unlock sub-100% collateral — two independent positive signals reduce uncertainty in ways either signal alone cannot."
     - Include this reasoning as a comment block in `CreditOracle.sol` above `getCompositeScore`.
-- **Phase 5** — Scoring pipeline (`pipeline/`). Decide Wallet-API vs per-chain approach. CHECKPOINT: score a test wallet end-to-end, show output.
+- **Phase 5** 🚧 — Scoring pipeline (`pipeline/`). API decision: Explorer SQL (Wallet API lacks Venus lending event history for dominant features). Two concurrent SQL queries per wallet (~30s). CHECKPOINT: score a test wallet end-to-end, show output.
 - **Phase 6** — Frontend. CHECKPOINT: walk through full demo flow end-to-end.
   - **User-facing feature labels (Phase 6 + Phase 7)**: everywhere a feature name is shown to the user or judge (factor breakdown component, ScoreGauge tooltips, validation report, hackathon report), use the display labels below — NOT the internal variable names. Internal names remain in the code, model artifacts, and `feature_config.json`. Display labels are also stored in `feature_config.json.feature_display_names` so they're the single source of truth.
     - `lending_active_days` → "Borrowing protocol activity (days)"
