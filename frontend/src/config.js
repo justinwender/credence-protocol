@@ -11,7 +11,9 @@ export const CONTRACTS = {
 };
 
 // Scoring API (FastAPI backend)
-export const API_BASE = '';  // proxied by Vite dev server to localhost:8000
+// In production: set VITE_API_URL to the deployed backend URL (e.g., https://credence-api.onrender.com)
+// In development: empty string means Vite dev server proxies to localhost:8000
+export const API_BASE = import.meta.env.VITE_API_URL || '';
 
 // ENS resolution uses Ethereum mainnet (ENS is on L1)
 // Using Cloudflare's public Ethereum gateway — no API key, reliable
