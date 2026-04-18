@@ -152,8 +152,8 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
     - The onchain-only composite cap resolves this: raw onchain 98 → capped composite 49 → ~110% collateral. The wallet gets slight benefit over standard DeFi (150%), but can't access undercollateralized terms without offchain attestation proving genuine creditworthiness.
     - Pitch framing: "A thin onchain history can produce a high score because minimal exposure implies minimal risk. But thin-file wallets shouldn't receive institutional-grade lending terms. The offchain attestation is what differentiates 'safe because inexperienced' from 'safe because genuinely creditworthy.' This is why the protocol requires both sources to unlock sub-100% collateral — two independent positive signals reduce uncertainty in ways either signal alone cannot."
     - Include this reasoning as a comment block in `CreditOracle.sol` above `getCompositeScore`.
-- **Phase 5** 🚧 — Scoring pipeline (`pipeline/`). API decision: Explorer SQL (Wallet API lacks Venus lending event history for dominant features). Two concurrent SQL queries per wallet (~30s). CHECKPOINT: score a test wallet end-to-end, show output.
-- **Phase 6** — Frontend. CHECKPOINT: walk through full demo flow end-to-end.
+- **Phase 5** ✅ — Scoring pipeline (`pipeline/`). API decision: Explorer SQL (Wallet API lacks Venus lending event history for dominant features). Two concurrent SQL queries per wallet (~88s total). End-to-end verified: real Venus borrower scored 44, pushed to CreditOracle (composite 22 onchain-only), confirmed on BscScan. FastAPI `POST /score` with graceful crosschain degradation.
+- **Phase 6** ✅ — Frontend (React + Vite + Tailwind + ethers.js v6). Bloomberg-terminal dark theme. 4-step credit-card-application progress indicator. Score gauge hero, factor breakdown with display names, composite score card, attestation simulator, lending interface. ENS resolution on wallet search. Full scoring flow verified: wallet search → 4-step progress → score 44 → composite 22 (onchain-only) → 148% collateral → factor breakdown with display names → attestation/lending panels.
   - **User-facing feature labels (Phase 6 + Phase 7)**: everywhere a feature name is shown to the user or judge (factor breakdown component, ScoreGauge tooltips, validation report, hackathon report), use the display labels below — NOT the internal variable names. Internal names remain in the code, model artifacts, and `feature_config.json`. Display labels are also stored in `feature_config.json.feature_display_names` so they're the single source of truth.
     - `lending_active_days` → "Borrowing protocol activity (days)"
     - `borrow_repay_ratio` → "Repayment consistency ratio"
@@ -168,6 +168,27 @@ Each phase ends at a checkpoint where the user confirms before the next phase st
     - `net_flow_direction` → "Recent accumulation trend"
     - Rationale: "lending" in DeFi terminology typically refers to lending-side supply, but the model measures borrowing behavior — "Borrowing protocol activity" is less ambiguous.
 - **Phase 7** — Documentation: architecture, pitch narrative, demo script, hackathon report. CHECKPOINT: final review before submission. (See Phase 6 note above — use display labels, not internal variable names, in all user-facing docs.)
+  - **Phase 7 deliverables checklist** (aligned with judge's starter kit: https://github.com/0xlucasliao/hackathon-starter-kit):
+    - `bsc.address` (repo root) — plain text file listing all 3 deployed contract names, addresses, and BscScan testnet links. Judge explicitly looks for this.
+    - `README.md` (repo root) — concise: one-paragraph description, value proposition in one sentence, contract addresses with BscScan links, "Quick Start" linking to TECHNICAL.md, navigation links to PROJECT.md and EXTRAS.md. Understandable in 30 seconds.
+    - `docs/PROJECT.md` — judge-facing project overview (2 pages max). Problem statement, solution overview, value proposition, real-world relevance, production roadmap. First thing the judge reads.
+    - `docs/TECHNICAL.md` — architecture overview + complete reproduction instructions. Exact copy-pasteable commands: clone, install deps, set env vars (.env.example), deploy contracts (or note already live), start scoring pipeline, start frontend. Every step must work on a clean terminal.
+    - `docs/EXTRAS.md` — links to demo video and AI build log.
+    - `docs/architecture.md` — detailed technical architecture (4 layers, data flow diagram)
+    - `docs/pitch_narrative.md` — the pitch story + credit card application analogy
+    - `docs/demo_script.md` — step-by-step 4-beat demo walkthrough
+    - `docs/hackathon_report.md` — comprehensive project report (written LAST, reflects what was actually built)
+    - `docs/ai_build_log.md` — chronicles AI usage per phase for hackathon "AI Build Log bonus." Structure: Phase 0-7, each noting what AI did vs. what human did. Pattern: AI generates, human reviews at checkpoints, human makes design decisions, human executes external steps. Written after everything else is done.
+    - Demo video — screen recording with voiceover of the 4-beat demo flow
+    - Team bio section in hackathon report
+  - **Phase 7 pitch narrative note — Credit card application analogy**:
+    - "Just like applying for a credit card online, Credence queries your financial history across five blockchains, runs the credit model, and returns an underwriting decision. The 90-second process reflects real computation across real onchain data, not a cached lookup."
+    - Include this analogy in `docs/pitch_narrative.md` and in the demo script.
+  - **Phase 7 production-considerations note — Latency optimization**:
+    - The 90-second scoring latency comes from ad-hoc SQL queries against Allium's OLAP warehouse (optimized for analytical throughput, not low-latency point lookups).
+    - In production, wallet features would be pre-computed and cached using materialized views or a dedicated indexing service, bringing latency to single-digit seconds.
+    - Model inference is sub-millisecond — the bottleneck is entirely data retrieval, which is a solved engineering problem at scale.
+    - Include in `docs/hackathon_report.md` under "Production Considerations — Latency."
   - **Phase 7 narrative note — Bidirectional credit identity (full vision)**:
     - The identity-persistence mechanism implemented in Phase 4 is a one-directional primitive: offchain identity anchors onchain reputation.
     - The full vision is bidirectional: onchain behavior also feeds back into the offchain credit profile, creating a unified credit record spanning wallets and protocols.

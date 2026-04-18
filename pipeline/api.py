@@ -4,14 +4,16 @@ Credence Protocol — Scoring API
 FastAPI server exposing a single endpoint:
 
     POST /score
-    Body: {"address": "0x..."} or {"ens": "name.eth"}
+    Body: {"address": "0x..."}
 
-Workflow per request:
-  1. Run two Allium Explorer SQL queries concurrently (BSC + crosschain)
-  2. Merge results into a raw feature dictionary
-  3. Apply the frozen FICO-style scorecard model (model/score.py)
-  4. Push the onchain score to CreditOracle on BSC testnet
-  5. Return the score, factor breakdown, and data completeness indicator
+Tiered data source:
+  Tier 0: Live Allium queries (if ALLIUM_API_KEY is set — ~90s per wallet)
+  Tier 1: Cached real wallet data (from demo_wallets.json — instant)
+  Tier 2: Deterministic synthetic features from address hash (instant)
+
+The model runs on every request regardless of data source. The score is
+pushed to the CreditOracle on BSC testnet. The response includes a
+`data_source` field: "live", "cached", or "synthetic".
 
 Usage:
     uvicorn pipeline.api:app --host 0.0.0.0 --port 8000 --reload
@@ -20,12 +22,14 @@ Usage:
 import sys
 import time
 import json
+import hashlib
 import traceback
 from pathlib import Path
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
-from fastapi import FastAPI, HTTPException
+import requests as http_requests
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -53,13 +57,41 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow CORS from any origin (frontend runs on a different port during dev)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rate Limiting (in-memory, hackathon-grade)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_rate_limit_per_ip: dict[str, list[float]] = defaultdict(list)
+_rate_limit_global: list[float] = []
+RATE_LIMIT_PER_IP_HOUR = 20
+RATE_LIMIT_GLOBAL_DAY = 100
+
+
+def _check_rate_limit(client_ip: str):
+    """Raise HTTP 429 if rate limits are exceeded."""
+    now = time.time()
+    hour_ago = now - 3600
+    day_ago = now - 86400
+
+    # Clean up old entries
+    _rate_limit_per_ip[client_ip] = [t for t in _rate_limit_per_ip[client_ip] if t > hour_ago]
+    _rate_limit_global[:] = [t for t in _rate_limit_global if t > day_ago]
+
+    if len(_rate_limit_per_ip[client_ip]) >= RATE_LIMIT_PER_IP_HOUR:
+        raise HTTPException(429, "Scoring rate limit reached. Please try again in a few minutes.")
+    if len(_rate_limit_global) >= RATE_LIMIT_GLOBAL_DAY:
+        raise HTTPException(429, "Scoring rate limit reached. Please try again in a few minutes.")
+
+    _rate_limit_per_ip[client_ip].append(now)
+    _rate_limit_global.append(now)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -83,12 +115,77 @@ class ScoreResponse(BaseModel):
     credit_score: int
     chains_used: int
     data_completeness: str
+    data_source: str = "live"  # "live", "cached", or "synthetic"
     factor_breakdown: list[FactorItem]
-    # On-chain state after pushing
     composite_score: int | None = None
     collateral_ratio_bps: int | None = None
     tx_hash: str | None = None
     error: str | None = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Demo fallback: cached wallets + synthetic features
+# ──────────────────────────────────────────────────────────────────────────────
+
+_demo_wallets_cache: dict | None = None
+
+
+def _load_demo_wallets() -> dict:
+    """Load cached real wallet features from demo_wallets.json (loaded once)."""
+    global _demo_wallets_cache
+    if _demo_wallets_cache is not None:
+        return _demo_wallets_cache
+
+    demo_path = Path(__file__).parent / "demo_wallets.json"
+    if demo_path.exists():
+        with open(demo_path) as f:
+            _demo_wallets_cache = json.load(f)
+    else:
+        _demo_wallets_cache = {}
+    return _demo_wallets_cache
+
+
+def _generate_synthetic_features(address: str) -> dict:
+    """
+    Generate deterministic pseudo-random features from a wallet address.
+    Same address always produces the same features (SHA-256 hash-based).
+    """
+    h = hashlib.sha256(address.lower().encode()).digest()
+    return {
+        "lending_active_days": (h[0] % 30) + 1,
+        "borrow_repay_ratio": round(0.5 + (h[1] % 150) / 100, 2),
+        "repay_count": h[2] % 20,
+        "unique_borrow_tokens": (h[3] % 3) + 1,
+        "current_total_usd": float(h[4] * h[5]),
+        "stablecoin_ratio": round((h[6] % 100) / 100, 2),
+        "net_flow_usd_90d": float((h[7] - 128) * 100),
+        "crosschain_total_tx_count": h[8] * h[9],
+        "crosschain_dex_trade_count": h[10] * 2,
+        "chains_active_on": h[11] % 5,
+        "has_used_bridge": 1 if h[12] > 128 else 0,
+    }
+
+
+def _try_fallback(address: str) -> tuple[dict, str, int, str]:
+    """
+    Tier 1: Check demo_wallets.json for cached real features.
+    Tier 2: Generate deterministic synthetic features from address hash.
+    """
+    cached = _load_demo_wallets()
+    addr_lower = address.lower()
+
+    if addr_lower in cached:
+        entry = cached[addr_lower]
+        return (
+            entry["features"],
+            entry.get("data_completeness", "5-chain history (cached)"),
+            entry.get("chains_used", 5),
+            "cached",
+        )
+
+    features = _generate_synthetic_features(address)
+    chains = 1 + features["chains_active_on"]
+    return features, "synthetic profile", chains, "synthetic"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -105,16 +202,13 @@ def _run_allium_query(sql: str, label: str, start_delay: float = 0) -> dict | No
     """
     Create → run → poll → fetch results for a single SQL query.
     Returns the first row as a dict, or None if no rows or error.
-
-    `start_delay` staggers concurrent requests to avoid rate limits.
     """
     if start_delay > 0:
         time.sleep(start_delay)
 
     try:
-        # 1. Create saved query (with retry on 429)
         for attempt in range(3):
-            resp = requests.post(
+            resp = http_requests.post(
                 f"{ALLIUM_API_BASE}/queries",
                 headers=ALLIUM_HEADERS,
                 json={
@@ -135,9 +229,8 @@ def _run_allium_query(sql: str, label: str, start_delay: float = 0) -> dict | No
             return None
         query_id = resp.json().get("query_id") or resp.json().get("id")
 
-        # 2. Run async (with retry on 429)
         for attempt in range(3):
-            resp = requests.post(
+            resp = http_requests.post(
                 f"{ALLIUM_API_BASE}/queries/{query_id}/run-async",
                 headers=ALLIUM_HEADERS,
                 json={"parameters": {}, "run_config": {"limit": ALLIUM_MAX_ROWS}},
@@ -155,10 +248,9 @@ def _run_allium_query(sql: str, label: str, start_delay: float = 0) -> dict | No
             return None
         run_id = resp.json().get("run_id") or resp.json().get("id")
 
-        # 3. Poll for completion
         start = time.time()
         while time.time() - start < ALLIUM_POLL_TIMEOUT:
-            resp = requests.get(
+            resp = http_requests.get(
                 f"{ALLIUM_API_BASE}/query-runs/{run_id}/results",
                 headers={"X-API-KEY": ALLIUM_API_KEY},
                 params={"f": "json"},
@@ -183,12 +275,7 @@ def _run_allium_query(sql: str, label: str, start_delay: float = 0) -> dict | No
 
 
 def _query_wallet_features(address: str) -> tuple[dict, str, int]:
-    """
-    Run Query A (BSC) and Query B (crosschain) concurrently.
-
-    Returns:
-        (raw_features_dict, data_completeness_label, chains_used_count)
-    """
+    """Run Query A (BSC) and Query B (crosschain) concurrently."""
     sql_a = build_query_a(address)
     sql_b = build_query_b(address)
 
@@ -196,7 +283,7 @@ def _query_wallet_features(address: str) -> tuple[dict, str, int]:
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_a = pool.submit(_run_allium_query, sql_a, "bsc", 0)
-        future_b = pool.submit(_run_allium_query, sql_b, "crosschain", 3)  # stagger 3s to avoid rate limit
+        future_b = pool.submit(_run_allium_query, sql_b, "crosschain", 3)
 
         for future in as_completed([future_a, future_b]):
             if future == future_a:
@@ -204,16 +291,13 @@ def _query_wallet_features(address: str) -> tuple[dict, str, int]:
             else:
                 results["b"] = future.result()
 
-    # BSC query is required
     if results["a"] is None:
-        raise RuntimeError("BSC query failed — cannot score without Venus lending data")
+        raise RuntimeError("BSC data query failed. Falling back to demo mode.")
 
     a = results["a"]
     b = results["b"]
 
-    # Build raw feature dict from query results
     raw = {
-        # From Query A (BSC)
         "lending_active_days": int(a.get("lending_active_days", 0) or 0),
         "borrow_repay_ratio": float(a.get("borrow_repay_ratio", 0) or 0),
         "repay_count": int(a.get("repay_count", 0) or 0),
@@ -223,17 +307,14 @@ def _query_wallet_features(address: str) -> tuple[dict, str, int]:
         "net_flow_usd_90d": float(a.get("net_flow_usd_90d", 0) or 0),
     }
 
-    # Determine crosschain data availability
     if b is not None:
         raw["crosschain_total_tx_count"] = int(b.get("crosschain_total_tx_count", 0) or 0)
         raw["crosschain_dex_trade_count"] = int(b.get("crosschain_dex_trade_count", 0) or 0)
         raw["chains_active_on"] = int(b.get("chains_active_on", 0) or 0)
         raw["has_used_bridge"] = int(b.get("has_used_bridge", 0) or 0)
-        # chains_used = BSC (always 1) + non-BSC chains with activity
         chains_used = 1 + raw["chains_active_on"]
         completeness = f"{chains_used}-chain history"
     else:
-        # Crosschain degraded — default to reference bins (0)
         raw["crosschain_total_tx_count"] = 0
         raw["crosschain_dex_trade_count"] = 0
         raw["chains_active_on"] = 0
@@ -249,30 +330,46 @@ def _query_wallet_features(address: str) -> tuple[dict, str, int]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/score", response_model=ScoreResponse)
-async def score_endpoint(req: ScoreRequest):
+async def score_endpoint(req: ScoreRequest, request: Request):
     """
-    Score a wallet: query Allium → run model → push to CreditOracle → return.
+    Score a wallet: query data → run model → push to CreditOracle → return.
+    Data source is tiered: live Allium → cached → synthetic.
     """
     address = req.address.strip()
     if not address.startswith("0x") or len(address) != 42:
         raise HTTPException(400, "Invalid address format (expected 0x + 40 hex chars)")
 
+    # Rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     print(f"\n{'='*60}")
     print(f"Scoring wallet: {address}")
     print(f"{'='*60}")
 
-    # Step 1: Query features from Allium
+    # Step 1: Get features (tiered: live → cached → synthetic)
     t0 = time.time()
-    try:
-        raw_features, completeness, chains_used = _query_wallet_features(address)
-    except RuntimeError as e:
-        raise HTTPException(503, str(e))
-    t_query = time.time() - t0
-    print(f"  [1/3] Allium queries completed in {t_query:.1f}s")
-    print(f"        Data completeness: {completeness}")
-    print(f"        Raw features: {json.dumps(raw_features, indent=2)}")
+    data_source = "live"
 
-    # Step 2: Run the frozen model
+    if ALLIUM_API_KEY:
+        # Tier 0: Try live Allium queries
+        try:
+            raw_features, completeness, chains_used = _query_wallet_features(address)
+            data_source = "live"
+        except RuntimeError:
+            # Allium failed — fall through to demo mode
+            print("  [1/3] Allium query failed, falling back to demo mode")
+            raw_features, completeness, chains_used, data_source = _try_fallback(address)
+    else:
+        # No API key — go straight to demo fallback
+        print("  [1/3] No Allium API key, using demo mode")
+        raw_features, completeness, chains_used, data_source = _try_fallback(address)
+
+    t_query = time.time() - t0
+    print(f"  [1/3] Features ready in {t_query:.1f}s (source: {data_source})")
+    print(f"        Data completeness: {completeness}")
+
+    # Step 2: Run the frozen model (always real, regardless of data source)
     t1 = time.time()
     try:
         result = score_wallet(raw_features)
@@ -282,7 +379,7 @@ async def score_endpoint(req: ScoreRequest):
     t_model = time.time() - t1
     print(f"  [2/3] Model inference in {t_model*1000:.0f}ms → score {credit_score}")
 
-    # Step 3: Push score to CreditOracle
+    # Step 3: Push score to CreditOracle (always real contract interaction)
     tx_hash = None
     composite = None
     collateral_bps = None
@@ -293,11 +390,9 @@ async def score_endpoint(req: ScoreRequest):
         tx_hash = push_onchain_score(address, credit_score, chains_used)
         print(f"  [3/3] Pushed to CreditOracle: tx {tx_hash}")
 
-        # Read back the composite + collateral from on-chain
         profile = read_composite_score(address)
         composite = profile["composite_score"]
 
-        # Read collateral ratio from LendingPool
         from pipeline.config import LENDING_POOL_ADDRESS, get_pool_abi
         from web3 import Web3
         from pipeline.push_score import get_web3
@@ -318,9 +413,9 @@ async def score_endpoint(req: ScoreRequest):
 
     t_push = time.time() - t2
     t_total = time.time() - t0
-    print(f"  Total time: {t_total:.1f}s (query={t_query:.1f}s, model={t_model*1000:.0f}ms, push={t_push:.1f}s)")
+    print(f"  Total time: {t_total:.1f}s (data={t_query:.1f}s, model={t_model*1000:.0f}ms, push={t_push:.1f}s)")
 
-    # Build response
+    # Build response — no Allium details, SQL, or API keys exposed
     breakdown = [
         FactorItem(
             feature=f["feature"],
@@ -337,6 +432,7 @@ async def score_endpoint(req: ScoreRequest):
         credit_score=credit_score,
         chains_used=chains_used,
         data_completeness=completeness,
+        data_source=data_source,
         factor_breakdown=breakdown,
         composite_score=composite,
         collateral_ratio_bps=collateral_bps,

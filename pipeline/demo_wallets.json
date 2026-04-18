@@ -1,0 +1,19 @@
+{
+  "0xd60b920cdf6a46a2643753322ada8fdbad0f0157": {
+    "features": {
+      "lending_active_days": 7,
+      "borrow_repay_ratio": 1.4,
+      "repay_count": 14,
+      "unique_borrow_tokens": 1,
+      "current_total_usd": 2.29,
+      "stablecoin_ratio": 0.069,
+      "net_flow_usd_90d": -14.37,
+      "crosschain_total_tx_count": 728,
+      "crosschain_dex_trade_count": 7,
+      "chains_active_on": 4,
+      "has_used_bridge": 1
+    },
+    "data_completeness": "5-chain history (cached)",
+    "chains_used": 5
+  }
+}
