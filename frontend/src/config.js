@@ -16,8 +16,8 @@ export const CONTRACTS = {
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 
 // ENS resolution uses Ethereum mainnet (ENS is on L1)
-// Using Cloudflare's public Ethereum gateway — no API key, reliable
-export const ENS_RPC = 'https://cloudflare-eth.com';
+// PublicNode's free Ethereum RPC — no API key, reliable for ENS
+export const ENS_RPC = 'https://ethereum-rpc.publicnode.com';
 
 // BSC testnet network config for MetaMask
 export const BSC_TESTNET_NETWORK = {
