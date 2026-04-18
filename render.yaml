@@ -1,0 +1,24 @@
+# Render Blueprint — Credence Protocol Backend
+# Deploy via: https://render.com/deploy
+services:
+  - type: web
+    name: credence-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r pipeline/requirements.txt && pip install scikit-learn numpy pandas
+    startCommand: uvicorn pipeline.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ALLIUM_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: BSC_TESTNET_RPC
+        value: https://data-seed-prebsc-1-s1.binance.org:8545/
+      - key: BSC_TESTNET_PRIVATE_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: ETHERSCAN_API_KEY
+        sync: false
+      - key: ATTESTATION_REGISTRY_ADDRESS
+        value: "0x7574581d7D872F605FD760Bb1BAcc69a551bf6e0"
+      - key: CREDIT_ORACLE_ADDRESS
+        value: "0x16253605BEef191024C950E00D829E0D410637B7"
+      - key: LENDING_POOL_ADDRESS
+        value: "0x159F82bFbBc4D5f7C962b5C4667ECA0004030edA"
