@@ -1,5 +1,7 @@
 # Credence Protocol
 
+**[Live Demo](https://credence-protocol.vercel.app/)** — no setup required.
+
 Onchain credit scoring and undercollateralized lending on BNB Chain. Credence blends two independent credit signals — onchain wallet behavior across 5 blockchains and ZK-verified offchain credit attestations — into a composite score that determines collateral requirements on a continuous curve. The result: creditworthy borrowers access capital-efficient lending terms that neither traditional finance nor existing DeFi protocols can offer alone.
 
 **Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.**

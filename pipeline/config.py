@@ -40,11 +40,19 @@ CONTRACTS_DIR = PROJECT_ROOT / "contracts"
 
 
 def _load_abi(contract_name: str) -> list:
-    """Load ABI from Foundry's compiled output."""
+    """Load ABI from pipeline/contracts/ (shipped with repo) or Foundry output."""
+    # First try the shipped ABI files (works on Render without Foundry)
+    shipped_path = Path(__file__).parent / "contracts" / f"{contract_name}.json"
+    if shipped_path.exists():
+        with open(shipped_path) as f:
+            artifact = json.load(f)
+        return artifact["abi"]
+
+    # Fall back to Foundry build output (local development)
     artifact_path = CONTRACTS_DIR / "out" / f"{contract_name}.sol" / f"{contract_name}.json"
     if not artifact_path.exists():
         raise FileNotFoundError(
-            f"ABI not found at {artifact_path}. Run `forge build` in contracts/ first."
+            f"ABI not found. Checked {shipped_path} and {artifact_path}."
         )
     with open(artifact_path) as f:
         artifact = json.load(f)

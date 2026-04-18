@@ -5,8 +5,8 @@ data/processed/*.csv
 data/processed/*.parquet
 data/processed/*.pkl
 
-# Trained model artifact
-model/model.pkl
+# Trained model artifact — UN-GITIGNORED for hackathon deployment
+# model/model.pkl
 
 # Environment
 .env
