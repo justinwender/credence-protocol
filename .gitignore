@@ -35,6 +35,10 @@ contracts/broadcast/
 .DS_Store
 Thumbs.db
 
+# Internal preparation docs (not submission materials)
+docs/pitch_narrative.md
+docs/demo_script.md
+
 # IDE
 .vscode/
 .idea/
