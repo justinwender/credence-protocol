@@ -257,7 +257,11 @@ The hackathon contracts use Solidity 0.8+ (built-in overflow protection), `onlyO
 
 ### Composable Credit Infrastructure
 
-Credence scores are composable onchain infrastructure, not a closed system. Any BNB Chain lending protocol can query the CreditOracle contract to read a wallet's composite score and adjust their own underwriting terms. This transforms Credence from a single lending pool into credit scoring infrastructure for the entire DeFi lending ecosystem. The revenue model extends beyond Credence's own lending activity to per-query or subscription fees charged to third-party protocols that integrate Credence scores into their underwriting. Every score query is logged onchain via event emissions, creating a transparent, auditable trail of credit inquiries, analogous to hard pulls in traditional credit reporting.
+Credence scores are composable onchain infrastructure, not a closed system. Any BNB Chain lending protocol can query the CreditOracle contract to read a wallet's composite score and adjust their own underwriting terms. This transforms Credence from a single lending pool into credit scoring infrastructure for the entire DeFi lending ecosystem. The revenue model extends beyond Credence's own lending activity to per-query or subscription fees charged to third-party protocols that integrate Credence scores. Every score query is logged onchain via event emissions, creating a transparent inquiry trail analogous to hard pulls in traditional credit reporting.
+
+### Onchain Hard Inquiries
+
+Onchain credit inquiries are the natural analog of hard pulls in traditional credit reporting. Every time a protocol queries the CreditOracle, the query is logged onchain via event emissions, creating a transparent, auditable trail of credit inquiries. In production, the frequency of recent score queries would be incorporated as a model feature, penalizing wallets that are rapidly seeking credit across multiple protocols in a short window, exactly as FICO penalizes multiple hard inquiries within a short period. This feature is architecturally built into the CreditOracle's event system and requires only model integration to activate.
 
 ### Bidirectional Credit Identity
 

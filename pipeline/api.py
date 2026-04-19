@@ -74,6 +74,10 @@ _rate_limit_global: list[float] = []
 RATE_LIMIT_PER_IP_HOUR = 20
 RATE_LIMIT_GLOBAL_DAY = 100
 
+# Activity tier penalty multipliers (applied after model inference, before contract push)
+NO_LENDING_PENALTY = 0.6    # Has onchain activity but zero Venus interactions
+THIN_LENDING_PENALTY = 0.8  # Has Venus interactions but < 2 active lending days
+
 
 def _check_rate_limit(client_ip: str):
     """Raise HTTP 429 if rate limits are exceeded."""
@@ -113,14 +117,69 @@ class FactorItem(BaseModel):
 class ScoreResponse(BaseModel):
     address: str
     credit_score: int
+    raw_model_score: int | None = None  # score before activity penalty
     chains_used: int
     data_completeness: str
     data_source: str = "live"  # "live", "cached", or "synthetic"
+    activity_tier: str = "full_history"  # "no_activity", "no_lending_history", "thin_lending_history", "full_history"
+    activity_note: str | None = None
     factor_breakdown: list[FactorItem]
     composite_score: int | None = None
     collateral_ratio_bps: int | None = None
     tx_hash: str | None = None
     error: str | None = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Activity tier classification and score penalties
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _classify_activity_tier(raw_features: dict) -> tuple[str, str | None, float]:
+    """
+    Classify wallet activity level and return (tier, note, penalty_multiplier).
+
+    Tiers:
+      no_activity         — zero activity across all chains (score → 0, don't push)
+      no_lending_history  — has general activity but zero Venus interactions
+      thin_lending_history — has Venus interactions but < 2 active lending days
+      full_history        — meaningful lending history (2+ active days)
+    """
+    lending_days = raw_features.get("lending_active_days", 0)
+    repay_count = raw_features.get("repay_count", 0)
+    borrow_ratio = raw_features.get("borrow_repay_ratio", 0)
+    crosschain_tx = raw_features.get("crosschain_total_tx_count", 0)
+    has_bridge = raw_features.get("has_used_bridge", 0)
+
+    # Check if there's any onchain activity at all
+    has_any_activity = (
+        lending_days > 0
+        or repay_count > 0
+        or crosschain_tx > 0
+        or has_bridge > 0
+        or raw_features.get("current_total_usd", 0) > 0
+    )
+
+    if not has_any_activity:
+        return "no_activity", "No onchain activity found.", 0.0
+
+    # Check for lending history
+    has_lending = lending_days > 0 or repay_count > 0 or borrow_ratio > 0
+
+    if not has_lending:
+        return (
+            "no_lending_history",
+            "Score based on general onchain activity only. No borrowing history found.",
+            NO_LENDING_PENALTY,
+        )
+
+    if lending_days < 2:
+        return (
+            "thin_lending_history",
+            "Limited borrowing history. Score will improve with additional lending activity.",
+            THIN_LENDING_PENALTY,
+        )
+
+    return "full_history", None, 1.0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -375,15 +434,47 @@ async def score_endpoint(req: ScoreRequest, request: Request):
         result = score_wallet(raw_features)
     except Exception as e:
         raise HTTPException(500, f"Model inference failed: {e}")
-    credit_score = result["credit_score"]
+    raw_model_score = result["credit_score"]
     t_model = time.time() - t1
-    print(f"  [2/3] Model inference in {t_model*1000:.0f}ms → score {credit_score}")
+    print(f"  [2/3] Model inference in {t_model*1000:.0f}ms → raw score {raw_model_score}")
 
-    # Step 3: Push score to CreditOracle (always real contract interaction)
+    # Step 2b: Apply activity tier penalty
+    activity_tier, activity_note, penalty = _classify_activity_tier(raw_features)
+    credit_score = max(0, int(raw_model_score * penalty))
+    if activity_tier == "no_activity":
+        credit_score = 0
+    print(f"        Activity tier: {activity_tier} (penalty: {penalty}x) → adjusted score {credit_score}")
+
+    # Step 3: Push score to CreditOracle (skip if no activity)
     tx_hash = None
     composite = None
     collateral_bps = None
     push_error = None
+
+    if activity_tier == "no_activity":
+        # Don't push a zero score for wallets with no activity
+        print("  [3/3] Skipped push (no onchain activity)")
+        breakdown = [
+            FactorItem(
+                feature=f["feature"],
+                display_name=f["display_name"],
+                bin=f["bin"],
+                coefficient=f["coefficient"],
+                is_reference=f["is_reference"],
+            )
+            for f in result["factor_breakdown"]
+        ]
+        return ScoreResponse(
+            address=address,
+            credit_score=0,
+            raw_model_score=raw_model_score,
+            chains_used=chains_used,
+            data_completeness=completeness,
+            data_source=data_source,
+            activity_tier=activity_tier,
+            activity_note=activity_note,
+            factor_breakdown=breakdown,
+        )
 
     t2 = time.time()
     try:
@@ -430,9 +521,12 @@ async def score_endpoint(req: ScoreRequest, request: Request):
     return ScoreResponse(
         address=address,
         credit_score=credit_score,
+        raw_model_score=raw_model_score,
         chains_used=chains_used,
         data_completeness=completeness,
         data_source=data_source,
+        activity_tier=activity_tier,
+        activity_note=activity_note,
         factor_breakdown=breakdown,
         composite_score=composite,
         collateral_ratio_bps=collateral_bps,

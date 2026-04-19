@@ -294,5 +294,57 @@
     0.37499526578701553,
     0.4962228625261622,
     0.385144558450334
-  ]
+  ],
+  "benchmarks": {
+    "lending_active_days": {
+      "top_decile_mean": 1.2,
+      "display": "1-2 days",
+      "action_item": "Maintain minimal borrowing activity -- fewer active lending days correlates with lower liquidation risk"
+    },
+    "borrow_repay_ratio": {
+      "top_decile_mean": 1.02,
+      "display": "~1.0 (balanced)",
+      "action_item": "Keep repayments closely matched to borrows for a ratio near 1.0"
+    },
+    "repay_count": {
+      "top_decile_mean": 2.1,
+      "display": "1-3 repayments",
+      "action_item": "A modest number of successful repayments demonstrates reliability without overexposure"
+    },
+    "unique_borrow_tokens": {
+      "top_decile_mean": 1.1,
+      "display": "1 token",
+      "action_item": "Focus borrowing on a single asset type to demonstrate disciplined strategy"
+    },
+    "current_total_usd": {
+      "top_decile_mean": 3.85,
+      "display": "Under $10",
+      "action_item": "Smaller on-chain portfolios carry lower liquidation exposure in the model"
+    },
+    "stablecoin_ratio": {
+      "top_decile_mean": 0.72,
+      "display": "~72% stablecoins",
+      "action_item": "Allocate a majority of your portfolio to stablecoins for risk reduction"
+    },
+    "crosschain_total_tx_count": {
+      "top_decile_mean": 4.3,
+      "display": "0-5 transactions",
+      "action_item": "Minimal cross-chain activity signals focused, lower-risk BSC usage"
+    },
+    "crosschain_dex_trade_count": {
+      "top_decile_mean": 1.8,
+      "display": "0-2 trades",
+      "action_item": "Limited cross-chain DEX trading indicates concentrated, lower-risk behavior"
+    },
+    "chains_active_on": {
+      "top_decile_mean": 0.15,
+      "display": "0 chains (BSC only)",
+      "action_item": "Focused activity on BSC signals disciplined portfolio management"
+    },
+    "has_used_bridge": {
+      "top_decile_mean": 0.52,
+      "display": "52% have used bridges",
+      "action_item": "Bridge experience provides a small positive signal but is not required for a high score"
+    }
+  }
 }

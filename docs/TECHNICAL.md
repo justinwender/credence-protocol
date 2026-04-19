@@ -93,7 +93,7 @@ LENDING_POOL_ADDRESS=0x159F82bFbBc4D5f7C962b5C4667ECA0004030edA
 
 ## Running Without an Allium API Key
 
-The scoring pipeline works out of the box without any external API keys. Judges can score wallets immediately using cached or synthetic data.
+No external API keys are required. For the full live-data experience, visit the deployed demo at [credence-protocol.vercel.app](https://credence-protocol.vercel.app/). To run locally without an Allium API key, the pipeline uses cached or synthetic data with full model inference.
 
 The pipeline uses a three-tier data sourcing strategy:
 

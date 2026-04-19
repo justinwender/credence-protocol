@@ -6,7 +6,7 @@ Onchain credit scoring and undercollateralized lending on BNB Chain. Credence bl
 
 **Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.**
 
-No external API keys are required to run the demo. See [docs/TECHNICAL.md](docs/TECHNICAL.md) for details on live vs. demo scoring modes.
+No external API keys are required. For the full live-data experience, visit the deployed demo at [credence-protocol.vercel.app](https://credence-protocol.vercel.app/). To run locally without an Allium API key, the pipeline uses cached or synthetic data with full model inference. See [docs/TECHNICAL.md](docs/TECHNICAL.md) for details.
 
 ## Deployed Contracts (BSC Testnet)
 

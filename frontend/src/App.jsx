@@ -6,6 +6,7 @@ import ScoringProgress from './components/ScoringProgress.jsx';
 import CompositeScore from './components/CompositeScore.jsx';
 import ScoreComponents from './components/ScoreComponents.jsx';
 import FactorBreakdown from './components/FactorBreakdown.jsx';
+import CreditReport from './components/CreditReport.jsx';
 import AttestationSimulator from './components/AttestationSimulator.jsx';
 import LendingInterface from './components/LendingInterface.jsx';
 import useWallet from './hooks/useWallet.js';
@@ -21,6 +22,9 @@ export default function App() {
   const [scoreResult, setScoreResult] = useState(null);
   const [scoreError, setScoreError] = useState(null);
   const [searchedAddress, setSearchedAddress] = useState(null);
+
+  // Credit report expansion state
+  const [reportExpanded, setReportExpanded] = useState(false);
 
   // On-chain composite state (refreshed after scoring or attestation)
   const [compositeData, setCompositeData] = useState(null);
@@ -91,6 +95,7 @@ export default function App() {
     setScoreError(null);
     setSearchedAddress(null);
     setCompositeData(null);
+    setReportExpanded(false);
   }, []);
 
   const hasScore = scoreResult !== null;
@@ -174,6 +179,26 @@ export default function App() {
             </div>
           </div>
 
+          {/* Activity tier notice */}
+          {scoreResult.activity_note && scoreResult.activity_tier !== 'full_history' && (
+            <div className="max-w-6xl mx-auto mb-4">
+              <div className={`rounded-lg px-4 py-3 text-sm border ${
+                scoreResult.activity_tier === 'no_activity'
+                  ? 'bg-danger/10 border-danger/30 text-danger'
+                  : scoreResult.activity_tier === 'no_lending_history'
+                  ? 'bg-warning/10 border-warning/30 text-warning'
+                  : 'bg-info/10 border-info/30 text-info'
+              }`}>
+                {scoreResult.activity_note}
+                {scoreResult.raw_model_score != null && scoreResult.raw_model_score !== scoreResult.credit_score && (
+                  <span className="text-text-muted ml-2">
+                    (Raw model score: {scoreResult.raw_model_score}, adjusted to {scoreResult.credit_score})
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Main grid: score + factors on left, attestation + lending on right */}
           <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-6">
             {/* Left column: Score dashboard (3/5 width) */}
@@ -202,6 +227,13 @@ export default function App() {
                 </h2>
                 <FactorBreakdown factors={scoreResult.factor_breakdown} />
               </div>
+
+              {/* Full credit report (expandable) */}
+              <CreditReport
+                factors={scoreResult.factor_breakdown}
+                isExpanded={reportExpanded}
+                onToggle={() => setReportExpanded((prev) => !prev)}
+              />
             </div>
 
             {/* Right column: attestation + lending (2/5 width) */}
