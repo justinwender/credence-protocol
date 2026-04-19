@@ -318,26 +318,24 @@ export default function App() {
 
       {/* Empty state */}
       {!hasScore && !isScoring && !scoreError && (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-lg">
-            <div className="w-16 h-16 rounded-2xl bg-bg-card border border-border flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-              </svg>
-            </div>
-            <h2 className="text-lg text-text-secondary font-medium mb-2">
-              Search a wallet to begin
-            </h2>
-            <p className="text-sm text-text-muted leading-relaxed mb-6">
-              Enter any BNB Chain wallet address or ENS name to generate a
+        <div className="flex-1 px-6">
+          {/* Search prompt — close to the search bar */}
+          <div className="text-center max-w-lg mx-auto mt-6 mb-10">
+            <p className="text-sm text-text-muted leading-relaxed">
+              Enter any BNB Chain wallet address or ENS name above to generate a
               real-time credit score based on onchain lending behavior across
               5 blockchains.
             </p>
+          </div>
 
-            {/* Demo wallets */}
-            <div className="border-t border-border pt-5">
-              <p className="text-xs text-text-muted mb-3">
-                Try a demo wallet with pre-cached real data:
+          {/* Demo wallets — lower on the page, clearly separated */}
+          <div className="max-w-lg mx-auto text-center">
+            <div className="border border-border rounded-xl bg-bg-card p-5">
+              <p className="text-xs text-text-muted mb-1">
+                Demo wallets (test phase only)
+              </p>
+              <p className="text-[10px] text-text-muted/60 mb-4">
+                Select a sample wallet to run the live scoring pipeline. Not included in production.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {[
@@ -350,7 +348,7 @@ export default function App() {
                   <button
                     key={addr}
                     onClick={() => handleSearch(addr)}
-                    className={`px-3 py-1.5 text-xs rounded-full border bg-bg-card hover:bg-bg-card-hover transition-colors ${color}`}
+                    className={`px-3 py-1.5 text-xs rounded-full border bg-bg-primary/60 hover:bg-bg-card-hover transition-colors ${color}`}
                   >
                     {label}
                   </button>
