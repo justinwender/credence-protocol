@@ -334,7 +334,7 @@ export default function App() {
               <p className="text-xs text-text-muted mb-1">
                 Demo wallets (test phase only)
               </p>
-              <p className="text-[10px] text-text-muted/60 mb-4">
+              <p className="text-[10px] text-text-muted mb-4">
                 Select a sample wallet to run the live scoring pipeline. Not included in production.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
