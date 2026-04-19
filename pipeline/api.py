@@ -409,6 +409,12 @@ async def score_endpoint(req: ScoreRequest, request: Request):
     print(f"Scoring wallet: {address}")
     print(f"{'='*60}")
 
+    # Fast path: return cached response instantly for demo wallets
+    cached = _load_demo_wallets()
+    if address.lower() in cached and "cached_response" in cached[address.lower()]:
+        print("  [CACHE HIT] Returning pre-computed response instantly")
+        return ScoreResponse(**cached[address.lower()]["cached_response"])
+
     # Step 1: Get features (tiered: live → cached → synthetic)
     t0 = time.time()
     data_source = "live"
@@ -567,6 +573,22 @@ async def score_stream(req: ScoreRequest, request: Request):
         async def error_gen():
             yield _sse_event({"event": "error", "message": "Invalid address format"})
         return StreamingResponse(error_gen(), media_type="text/event-stream")
+
+    # Fast path: return cached response instantly for demo wallets
+    cached = _load_demo_wallets()
+    if address.lower() in cached and "cached_response" in cached[address.lower()]:
+        print(f"  [CACHE HIT] Returning pre-computed response instantly for {address}")
+        cached_resp = cached[address.lower()]["cached_response"]
+        async def cached_gen():
+            yield _sse_event({"event": "start", "address": address})
+            yield _sse_event({"event": "bsc_start"})
+            yield _sse_event({"event": "bsc_done"})
+            yield _sse_event({"event": "crosschain_start"})
+            yield _sse_event({"event": "crosschain_done"})
+            yield _sse_event({"event": "queries_complete", "data_source": "cached"})
+            yield _sse_event({"event": "model_done", "score": cached_resp["credit_score"], "raw_score": cached_resp.get("raw_model_score"), "activity_tier": cached_resp.get("activity_tier", "full_history")})
+            yield _sse_event({"event": "result", "data": cached_resp})
+        return StreamingResponse(cached_gen(), media_type="text/event-stream")
 
     client_ip = request.client.host if request.client else "unknown"
     try:

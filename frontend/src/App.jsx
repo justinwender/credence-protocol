@@ -335,7 +335,7 @@ export default function App() {
                 Demo wallets (test phase only)
               </p>
               <p className="text-[10px] text-text-muted mb-4">
-                Select a sample wallet to run the live scoring pipeline. Not included in production.
+                Pre-scored wallets with cached results. Loads instantly. Use the search bar above for live scoring.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {[
