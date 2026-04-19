@@ -131,7 +131,13 @@ export default function App() {
         }
       }
     } catch (err) {
-      setScoreError(err.message);
+      // Friendly message for cold-start / network errors (Render free tier sleeps after inactivity)
+      const msg = err.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network') || msg === 'Not Found') {
+        setScoreError('Backend is starting up (free tier cold start). Please wait 30-60 seconds and try again.');
+      } else {
+        setScoreError(msg);
+      }
     } finally {
       setIsScoring(false);
     }
