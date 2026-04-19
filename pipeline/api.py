@@ -28,9 +28,12 @@ from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import asyncio
+import queue
 import requests as http_requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Add project root for imports
@@ -533,6 +536,206 @@ async def score_endpoint(req: ScoreRequest, request: Request):
         tx_hash=tx_hash,
         error=push_error,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Streaming endpoint (SSE) — real-time progress updates
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _sse_event(data: dict) -> str:
+    """Format a single SSE event."""
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/score/stream")
+async def score_stream(req: ScoreRequest, request: Request):
+    """
+    Same as /score but returns Server-Sent Events with real-time progress.
+    Events emitted:
+      - {event: "bsc_start"}
+      - {event: "crosschain_start"}
+      - {event: "bsc_done"}
+      - {event: "crosschain_done"}
+      - {event: "model_done", score: N}
+      - {event: "push_start"}
+      - {event: "push_done"}
+      - {event: "result", data: {full ScoreResponse}}
+      - {event: "error", message: "..."}
+    """
+    address = req.address.strip()
+    if not address.startswith("0x") or len(address) != 42:
+        async def error_gen():
+            yield _sse_event({"event": "error", "message": "Invalid address format"})
+        return StreamingResponse(error_gen(), media_type="text/event-stream")
+
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        _check_rate_limit(client_ip)
+    except HTTPException as e:
+        async def error_gen():
+            yield _sse_event({"event": "error", "message": e.detail})
+        return StreamingResponse(error_gen(), media_type="text/event-stream")
+
+    progress_q: queue.Queue = queue.Queue()
+
+    async def generate():
+        yield _sse_event({"event": "start", "address": address})
+
+        # Determine data source tier
+        if ALLIUM_API_KEY:
+            # Tier 0: Live Allium — run both queries concurrently with progress events
+            sql_a = build_query_a(address)
+            sql_b = build_query_b(address)
+
+            def run_bsc():
+                progress_q.put(("bsc_start", {}))
+                result = _run_allium_query(sql_a, "bsc", 0)
+                progress_q.put(("bsc_done", {}))
+                return result
+
+            def run_crosschain():
+                progress_q.put(("crosschain_start", {}))
+                result = _run_allium_query(sql_b, "crosschain", 3)
+                progress_q.put(("crosschain_done", {}))
+                return result
+
+            loop = asyncio.get_event_loop()
+            pool = ThreadPoolExecutor(max_workers=2)
+            bsc_future = pool.submit(run_bsc)
+            xchain_future = pool.submit(run_crosschain)
+
+            # Poll for progress events until both futures complete
+            while not (bsc_future.done() and xchain_future.done()):
+                try:
+                    evt_type, evt_data = progress_q.get(timeout=0.3)
+                    yield _sse_event({"event": evt_type, **evt_data})
+                except queue.Empty:
+                    pass
+                await asyncio.sleep(0.1)
+
+            # Drain remaining events
+            while not progress_q.empty():
+                evt_type, evt_data = progress_q.get_nowait()
+                yield _sse_event({"event": evt_type, **evt_data})
+
+            pool.shutdown(wait=False)
+
+            a = bsc_future.result()
+            b = xchain_future.result()
+
+            if a is None:
+                # Allium failed — fall through to demo mode
+                yield _sse_event({"event": "fallback", "reason": "Allium query timed out"})
+                raw_features, completeness, chains_used, data_source = _try_fallback(address)
+            else:
+                data_source = "live"
+                raw_features = {
+                    "lending_active_days": int(a.get("lending_active_days", 0) or 0),
+                    "borrow_repay_ratio": float(a.get("borrow_repay_ratio", 0) or 0),
+                    "repay_count": int(a.get("repay_count", 0) or 0),
+                    "unique_borrow_tokens": max(int(a.get("unique_borrow_tokens", 0) or 0), 1),
+                    "current_total_usd": float(a.get("current_total_usd", 0) or 0),
+                    "stablecoin_ratio": float(a.get("stablecoin_ratio", 0) or 0),
+                    "net_flow_usd_90d": float(a.get("net_flow_usd_90d", 0) or 0),
+                }
+                if b is not None:
+                    raw_features["crosschain_total_tx_count"] = int(b.get("crosschain_total_tx_count", 0) or 0)
+                    raw_features["crosschain_dex_trade_count"] = int(b.get("crosschain_dex_trade_count", 0) or 0)
+                    raw_features["chains_active_on"] = int(b.get("chains_active_on", 0) or 0)
+                    raw_features["has_used_bridge"] = int(b.get("has_used_bridge", 0) or 0)
+                    chains_used = 1 + raw_features["chains_active_on"]
+                    completeness = f"{chains_used}-chain history"
+                else:
+                    raw_features.update({"crosschain_total_tx_count": 0, "crosschain_dex_trade_count": 0, "chains_active_on": 0, "has_used_bridge": 0})
+                    chains_used = 1
+                    completeness = "BNB Chain only"
+        else:
+            # Demo mode — instant fallback
+            yield _sse_event({"event": "bsc_start"})
+            yield _sse_event({"event": "bsc_done"})
+            yield _sse_event({"event": "crosschain_start"})
+            yield _sse_event({"event": "crosschain_done"})
+            raw_features, completeness, chains_used, data_source = _try_fallback(address)
+
+        yield _sse_event({"event": "queries_complete", "data_source": data_source})
+
+        # Model inference
+        yield _sse_event({"event": "model_start"})
+        try:
+            result = score_wallet(raw_features)
+        except Exception as e:
+            yield _sse_event({"event": "error", "message": f"Model inference failed: {e}"})
+            return
+
+        raw_model_score = result["credit_score"]
+        activity_tier, activity_note, penalty = _classify_activity_tier(raw_features)
+        credit_score = max(0, int(raw_model_score * penalty))
+        if activity_tier == "no_activity":
+            credit_score = 0
+
+        yield _sse_event({"event": "model_done", "score": credit_score, "raw_score": raw_model_score, "activity_tier": activity_tier})
+
+        # Push to contract
+        tx_hash = None
+        composite = None
+        collateral_bps = None
+        push_error = None
+
+        if activity_tier != "no_activity":
+            yield _sse_event({"event": "push_start"})
+            try:
+                tx_hash = push_onchain_score(address, credit_score, chains_used)
+                profile = read_composite_score(address)
+                composite = profile["composite_score"]
+
+                from pipeline.config import LENDING_POOL_ADDRESS, get_pool_abi
+                from web3 import Web3
+                from pipeline.push_score import get_web3
+                w3 = get_web3()
+                pool_contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(LENDING_POOL_ADDRESS),
+                    abi=get_pool_abi(),
+                )
+                collateral_bps = pool_contract.functions.getBorrowerCollateralRatioBps(
+                    Web3.to_checksum_address(address)
+                ).call()
+                yield _sse_event({"event": "push_done", "tx_hash": tx_hash})
+            except Exception as e:
+                push_error = str(e)
+                yield _sse_event({"event": "push_done", "error": push_error})
+
+        # Final result
+        breakdown = [
+            {
+                "feature": f["feature"],
+                "display_name": f["display_name"],
+                "bin": f["bin"],
+                "coefficient": f["coefficient"],
+                "is_reference": f["is_reference"],
+            }
+            for f in result["factor_breakdown"]
+        ]
+
+        yield _sse_event({
+            "event": "result",
+            "data": {
+                "address": address,
+                "credit_score": credit_score,
+                "raw_model_score": raw_model_score,
+                "chains_used": chains_used,
+                "data_completeness": completeness,
+                "data_source": data_source,
+                "activity_tier": activity_tier,
+                "activity_note": activity_note,
+                "factor_breakdown": breakdown,
+                "composite_score": composite,
+                "collateral_ratio_bps": collateral_bps,
+                "tx_hash": tx_hash,
+                "error": push_error,
+            },
+        })
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

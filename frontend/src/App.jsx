@@ -51,15 +51,20 @@ export default function App() {
     }
   }, [readOracle, readPool, readRegistry]);
 
+  // Progress state for the chain map (real SSE events from backend)
+  const [progress, setProgress] = useState({});
+
   const handleSearch = useCallback(async (address) => {
     setIsScoring(true);
     setScoreResult(null);
     setScoreError(null);
     setSearchedAddress(address);
     setCompositeData(null);
+    setProgress({});
+    setReportExpanded(false);
 
     try {
-      const resp = await fetch(`${API_BASE}/score`, {
+      const resp = await fetch(`${API_BASE}/score/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address }),
@@ -70,11 +75,41 @@ export default function App() {
         throw new Error(errData.detail || `HTTP ${resp.status}`);
       }
 
-      const data = await resp.json();
-      setScoreResult(data);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      // Refresh on-chain composite data
-      await refreshComposite(address);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            // Update progress state based on real backend events
+            setProgress(prev => ({ ...prev, [event.event]: true, lastEvent: event }));
+
+            if (event.event === 'error') {
+              throw new Error(event.message);
+            }
+
+            if (event.event === 'result') {
+              setScoreResult(event.data);
+              await refreshComposite(address);
+            }
+          } catch (parseErr) {
+            if (parseErr.message && !parseErr.message.includes('JSON')) {
+              throw parseErr;
+            }
+          }
+        }
+      }
     } catch (err) {
       setScoreError(err.message);
     } finally {
@@ -133,7 +168,7 @@ export default function App() {
       />
 
       {/* Loading state: credit-card-application-style progress */}
-      <ScoringProgress isActive={isScoring} />
+      <ScoringProgress isActive={isScoring} progress={progress} />
 
       {/* Error state */}
       {scoreError && !isScoring && (
