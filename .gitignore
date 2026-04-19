@@ -39,6 +39,10 @@ Thumbs.db
 docs/pitch_narrative.md
 docs/demo_script.md
 
+# Claude Code (development tool config, not part of the project)
+.claude/
+CLAUDE.md
+
 # IDE
 .vscode/
 .idea/
