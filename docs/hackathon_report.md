@@ -269,9 +269,21 @@ The identity-persistence mechanism we built is one-directional: offchain identit
 
 ## 9. Team and Acknowledgments
 
-[Team bio to be added by Justin]
+### Justin Wender (Solo Developer)
 
-**Built with:** Claude Code (Anthropic), Allium blockchain data infrastructure, Foundry smart contract toolchain, ethers.js v6, Web3Modal, React, Vite, Tailwind CSS, FastAPI, scikit-learn.
+Justin is completing his MS in Economics and Data Science at Northeastern University (expected July 2026, 3.9 GPA) after earning his BS in Politics, Philosophy, and Economics (Concentration: Logic and Game Theory) Summa Cum Laude in December 2025. He serves as President and Director of Research at NEU Blockchain, Northeastern's blockchain club, where he oversees 12 board members and coordinates relationships with VCs, protocols, and universities.
+
+His professional experience spans digital asset research and blockchain infrastructure. At Fireblocks (Summer 2025), he worked on NYDFS cold custody self-certification, MPC warm wallet implementation, and asset research covering 18 digital assets. At TRGC Amsterdam (November 2024 to March 2025), he evaluated 30+ assets for a $10M fund serving high-net-worth clients.
+
+Justin recently accepted a Growth/BDR role at Allium, the institutional blockchain data platform (Series A, backed by Kleiner Perkins), starting May 2026. Allium's data infrastructure powers the crosschain wallet features that feed Credence's credit scoring model.
+
+His research interests span blockchain economics (token emission schedules as credible commitment devices, applying Kydland-Prescott monetary theory to protocol design), DeFi capital markets, and the application of traditional finance methodology to onchain systems. Credence Protocol reflects this research direction: bringing traditional credit scoring methodology, specifically the FICO logistic regression scorecard approach, onchain for the first time.
+
+[LinkedIn](https://www.linkedin.com/in/justinwender/) | wender.j@northeastern.edu
+
+### Built With
+
+Claude Code (Anthropic), Allium blockchain data infrastructure, Foundry smart contract toolchain, ethers.js v6, Web3Modal, React, Vite, Tailwind CSS, FastAPI, scikit-learn.
 
 ## Deployed Contracts (BSC Testnet, Chain ID 97)
 

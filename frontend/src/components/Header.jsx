@@ -8,9 +8,7 @@ export default function Header({ account, onConnect, onDisconnect, isConnecting,
         className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer"
         title="Return to home"
       >
-        <div className="w-8 h-8 rounded bg-accent flex items-center justify-center text-bg-primary font-bold text-sm">
-          C
-        </div>
+        <img src="/logo.png" alt="Credence" className="w-10 h-10 rounded object-contain" />
         <div className="text-left">
           <h1 className="text-lg font-semibold text-text-primary tracking-tight">
             Credence Protocol

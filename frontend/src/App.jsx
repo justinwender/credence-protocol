@@ -319,7 +319,7 @@ export default function App() {
       {/* Empty state */}
       {!hasScore && !isScoring && !scoreError && (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
+          <div className="text-center max-w-lg">
             <div className="w-16 h-16 rounded-2xl bg-bg-card border border-border flex items-center justify-center mx-auto mb-4">
               <svg className="w-8 h-8 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -328,11 +328,35 @@ export default function App() {
             <h2 className="text-lg text-text-secondary font-medium mb-2">
               Search a wallet to begin
             </h2>
-            <p className="text-sm text-text-muted leading-relaxed">
+            <p className="text-sm text-text-muted leading-relaxed mb-6">
               Enter any BNB Chain wallet address or ENS name to generate a
               real-time credit score based on onchain lending behavior across
               5 blockchains.
             </p>
+
+            {/* Demo wallets */}
+            <div className="border-t border-border pt-5">
+              <p className="text-xs text-text-muted mb-3">
+                Try a demo wallet with pre-cached real data:
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {[
+                  { addr: '0xd60b920cdf6a46a2643753322ada8fdbad0f0157', label: 'Active borrower', color: 'border-accent/40 text-accent' },
+                  { addr: '0x1120ecaff5cda10c370490fc99d99ba3faecd19c', label: 'Liquidated borrower', color: 'border-danger/40 text-danger' },
+                  { addr: '0x1a526787c277a2636c85c063a238823ca4798bac', label: 'Thin file', color: 'border-warning/40 text-warning' },
+                  { addr: '0xd574df2073064f06c90c557a85c1c000d2448a6d', label: 'Crosschain user', color: 'border-info/40 text-info' },
+                  { addr: '0x14279617d8357a4b23e81ea6fadcb1d4dbea0faa', label: 'Strong history', color: 'border-accent-bright/40 text-accent-bright' },
+                ].map(({ addr, label, color }) => (
+                  <button
+                    key={addr}
+                    onClick={() => handleSearch(addr)}
+                    className={`px-3 py-1.5 text-xs rounded-full border bg-bg-card hover:bg-bg-card-hover transition-colors ${color}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
