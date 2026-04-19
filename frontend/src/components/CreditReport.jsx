@@ -2,80 +2,79 @@
  * CreditReport — Expandable full credit report panel.
  *
  * For each of the 10 model features, shows:
- *   - Display name
- *   - Wallet's value (derived from the bin label)
- *   - Qualitative tier badge (Poor / Fair / Good / Excellent)
- *   - Coefficient impact
- *   - Top-decile benchmark
- *   - Action item
+ *   - Display name with tier badge (Poor / Fair / Good / Excellent)
+ *   - Wallet's value (derived from bin label)
+ *   - Qualitative impact level (Very High / High / Moderate / Low / Minimal)
+ *   - Top-decile benchmark comparison
+ *   - Action item for improvement
+ *
+ * Tier direction is domain-informed:
+ *   - "experience_positive": more activity = better (flipped from model direction)
+ *   - "model_aligned": model reference bin = best (default)
+ *   - "boolean": positive = Good, negative = Fair
  *
  * Bloomberg-terminal dark aesthetic, Tailwind v4 classes.
  */
 
 // ---------------------------------------------------------------------------
-// Static data embedded from model/feature_config.json benchmarks + specs
+// Feature metadata: benchmarks, action items, tier direction
 // ---------------------------------------------------------------------------
 
-const BENCHMARKS = {
+const FEATURE_META = {
   lending_active_days: {
-    top_decile_mean: 1.2,
-    display: '1-2 days',
-    action_item:
-      'Maintain minimal borrowing activity -- fewer active lending days correlates with lower liquidation risk',
+    tier_direction: 'experience_positive',
+    benchmark_display: '15+ active days',
+    action_item: 'Build a longer track record of borrowing activity on supported lending protocols',
   },
   borrow_repay_ratio: {
-    top_decile_mean: 1.02,
-    display: '~1.0 (balanced)',
-    action_item:
-      'Keep repayments closely matched to borrows for a ratio near 1.0',
+    tier_direction: 'model_aligned',
+    benchmark_display: '~1.0 (balanced)',
+    action_item: 'Keep repayments closely matched to borrows for a ratio near 1.0',
   },
   repay_count: {
-    top_decile_mean: 2.1,
-    display: '1-3 repayments',
-    action_item:
-      'A modest number of successful repayments demonstrates reliability without overexposure',
+    tier_direction: 'experience_positive',
+    benchmark_display: '10+ repayments',
+    action_item: 'Demonstrate reliability through consistent loan repayments over time',
   },
   unique_borrow_tokens: {
-    top_decile_mean: 1.1,
-    display: '1 token',
-    action_item:
-      'Focus borrowing on a single asset type to demonstrate disciplined strategy',
+    tier_direction: 'experience_positive',
+    benchmark_display: '3+ distinct assets',
+    action_item: 'Diversify borrowing across multiple asset types to demonstrate range',
   },
   current_total_usd: {
-    top_decile_mean: 3.85,
-    display: 'Under $10',
-    action_item:
-      'Smaller on-chain portfolios carry lower liquidation exposure in the model',
+    tier_direction: 'experience_positive',
+    benchmark_display: '$1,000+ portfolio',
+    action_item: 'Maintain a larger onchain portfolio to demonstrate financial capacity',
   },
   stablecoin_ratio: {
-    top_decile_mean: 0.72,
-    display: '~72% stablecoins',
-    action_item:
-      'Allocate a majority of your portfolio to stablecoins for risk reduction',
+    tier_direction: 'model_aligned',
+    benchmark_display: '50%+ stablecoins',
+    action_item: 'Allocate a majority of your portfolio to stablecoins for risk reduction',
   },
   crosschain_total_tx_count: {
-    top_decile_mean: 4.3,
-    display: '0-5 transactions',
-    action_item:
-      'Minimal cross-chain activity signals focused, lower-risk BSC usage',
+    tier_direction: 'experience_positive',
+    benchmark_display: '1,000+ transactions',
+    action_item: 'Expand crosschain activity to demonstrate sophisticated portfolio management',
   },
   crosschain_dex_trade_count: {
-    top_decile_mean: 1.8,
-    display: '0-2 trades',
-    action_item:
-      'Limited cross-chain DEX trading indicates concentrated, lower-risk behavior',
+    tier_direction: 'experience_positive',
+    benchmark_display: '100+ DEX trades',
+    action_item: 'Increase crosschain DEX trading activity to signal market sophistication',
   },
   chains_active_on: {
-    top_decile_mean: 0.15,
-    display: '0 chains (BSC only)',
-    action_item:
-      'Focused activity on BSC signals disciplined portfolio management',
+    tier_direction: 'experience_positive',
+    benchmark_display: '4 chains active',
+    action_item: 'Expand activity across more blockchain networks',
   },
   has_used_bridge: {
-    top_decile_mean: 0.52,
-    display: '52% have used bridges',
-    action_item:
-      'Bridge experience provides a small positive signal but is not required for a high score',
+    tier_direction: 'boolean',
+    benchmark_display: 'Bridge experience',
+    action_item: 'Use a crosschain bridge at least once to demonstrate crosschain capability',
+  },
+  net_flow_direction: {
+    tier_direction: 'boolean',
+    benchmark_display: 'Accumulating',
+    action_item: 'Maintain a positive net flow (accumulating rather than depleting) over 90 days',
   },
 };
 
@@ -101,76 +100,84 @@ const FEATURE_CATEGORIES = {
 };
 
 // ---------------------------------------------------------------------------
-// Tier assignment logic
+// Bin ordering for tier assignment
 // ---------------------------------------------------------------------------
-// Reference bin = Excellent (coefficient 0, safest).
-// For non-boolean continuous_binned features, bins are ordered from reference
-// outward. We rank by absolute coefficient magnitude:
-//   - Reference bin -> Excellent
-//   - Smallest |coef| non-reference -> Good
-//   - Mid |coef| -> Fair
-//   - Largest |coef| -> Poor
-// For booleans: positive coef + value=1 -> Good, value=0 -> Fair (small impact)
+// For experience_positive features, bins are ordered from least to most activity.
+// For model_aligned features, bins are ordered from reference (best) outward.
 
-const TIER_CONFIG = {
-  // Maps feature -> { binLabel: tier }
-  // Built from the coefficient table in feature_config.json.
-  lending_active_days: {
-    '[1, 1]': 'Excellent',       // reference, coef 0
-    '[2, 4]': 'Good',            // coef -0.80
-    '[5, 14]': 'Fair',           // coef -1.05
-    '[15, inf)': 'Poor',         // coef -1.23
-  },
-  borrow_repay_ratio: {
-    '(0.9, 1.1]': 'Excellent',  // reference, coef 0
-    '[0, 0.9]': 'Good',         // coef -0.25
-    '(1.1, 2.0]': 'Fair',       // coef -0.54
-    '(2.0, inf)': 'Poor',       // coef -0.60
-  },
-  repay_count: {
-    '[0, 3]': 'Excellent',       // reference, coef 0
-    '[4, 9]': 'Excellent',       // coef +0.02 (positive, very small)
-    '[10, inf)': 'Good',         // coef +0.04 (positive)
-  },
-  unique_borrow_tokens: {
-    '[1, 1]': 'Excellent',       // reference, coef 0
-    '[2, 2]': 'Good',            // coef -0.016
-    '[3, inf)': 'Fair',          // coef -0.057
-  },
-  current_total_usd: {
-    '[0, 10]': 'Excellent',      // reference, coef 0
-    '(10, 100]': 'Good',        // coef -0.075
-    '(100, 1000]': 'Fair',      // coef -0.17
-    '(1000, inf)': 'Fair',      // coef -0.11
-  },
-  stablecoin_ratio: {
-    '(0.5, 1.0]': 'Excellent',  // reference, coef 0
-    '(0.05, 0.5]': 'Good',      // coef -0.17
-    '[0, 0.05]': 'Fair',        // coef -0.26
-  },
-  crosschain_total_tx_count: {
-    '[0, 0]': 'Excellent',       // reference, coef 0
-    '[1, 100]': 'Excellent',     // coef +0.02 (positive)
-    '[101, 1000]': 'Good',       // coef +0.01
-    '[1001, inf)': 'Good',       // coef +0.03
-  },
-  crosschain_dex_trade_count: {
-    '[0, 0]': 'Excellent',       // reference, coef 0
-    '[1, 100]': 'Good',          // coef -0.06
-    '[101, inf)': 'Fair',        // coef -0.08
-  },
-  chains_active_on: {
-    '0': 'Excellent',            // reference, coef 0
-    '1-3': 'Excellent',          // coef -0.003 (near zero)
-    '4': 'Good',                 // coef +0.067
-  },
-  has_used_bridge: {
-    '1': 'Good',                 // coef +0.14
-    '0': 'Good',                 // small impact either way
-  },
+const BIN_ORDERS = {
+  lending_active_days: ['[1, 1]', '[2, 4]', '[5, 14]', '[15, inf)'],
+  borrow_repay_ratio: ['(0.9, 1.1]', '[0, 0.9]', '(1.1, 2.0]', '(2.0, inf)'],
+  repay_count: ['[0, 3]', '[4, 9]', '[10, inf)'],
+  unique_borrow_tokens: ['[1, 1]', '[2, 2]', '[3, inf)'],
+  current_total_usd: ['[0, 10]', '(10, 100]', '(100, 1000]', '(1000, inf)'],
+  stablecoin_ratio: ['(0.5, 1.0]', '(0.05, 0.5]', '[0, 0.05]'],
+  crosschain_total_tx_count: ['[0, 0]', '[1, 100]', '[101, 1000]', '[1001, inf)'],
+  crosschain_dex_trade_count: ['[0, 0]', '[1, 100]', '[101, inf)'],
+  chains_active_on: ['0', '1-3', '4'],
+  has_used_bridge: ['0', '1'],
+  net_flow_direction: ['0', '1'],
 };
 
-// Map bin labels to human-readable wallet value strings
+// ---------------------------------------------------------------------------
+// Tier assignment
+// ---------------------------------------------------------------------------
+
+function getTier(feature, bin) {
+  const meta = FEATURE_META[feature];
+  if (!meta) return 'Fair';
+
+  const direction = meta.tier_direction;
+  const bins = BIN_ORDERS[feature];
+  if (!bins) return 'Fair';
+
+  const idx = bins.indexOf(bin);
+  if (idx === -1) return 'Fair';
+
+  if (direction === 'boolean') {
+    // Positive value (last bin) = Good, negative = Fair
+    return idx === bins.length - 1 ? 'Good' : 'Fair';
+  }
+
+  const n = bins.length;
+
+  if (direction === 'experience_positive') {
+    // More activity = better. Last bin = Excellent, first = Poor/Insufficient
+    if (n <= 2) return idx === n - 1 ? 'Good' : 'Poor';
+    if (n === 3) return ['Poor', 'Fair', 'Excellent'][idx];
+    // 4 bins
+    return ['Poor', 'Fair', 'Good', 'Excellent'][idx];
+  }
+
+  // model_aligned: reference bin (idx 0) = Excellent, furthest = Poor
+  if (n <= 2) return idx === 0 ? 'Excellent' : 'Fair';
+  if (n === 3) return ['Excellent', 'Good', 'Poor'][idx];
+  // 4+ bins
+  if (idx === 0) return 'Excellent';
+  if (idx === n - 1) return 'Poor';
+  if (idx <= n / 2) return 'Good';
+  return 'Fair';
+}
+
+// ---------------------------------------------------------------------------
+// Qualitative impact level (replaces raw coefficient numbers)
+// ---------------------------------------------------------------------------
+
+function getImpactLevel(coefficient, isReference) {
+  if (isReference) return { label: 'Baseline', style: 'text-text-muted' };
+
+  const abs = Math.abs(coefficient);
+  if (abs >= 0.8) return { label: 'Very High Impact', style: 'text-danger' };
+  if (abs >= 0.4) return { label: 'High Impact', style: 'text-warning' };
+  if (abs >= 0.15) return { label: 'Moderate Impact', style: 'text-info' };
+  if (abs >= 0.05) return { label: 'Low Impact', style: 'text-text-secondary' };
+  return { label: 'Minimal Impact', style: 'text-text-muted' };
+}
+
+// ---------------------------------------------------------------------------
+// Human-readable bin value strings
+// ---------------------------------------------------------------------------
+
 function formatBinValue(feature, bin) {
   const formatters = {
     lending_active_days: {
@@ -180,10 +187,10 @@ function formatBinValue(feature, bin) {
       '[15, inf)': '15+ days',
     },
     borrow_repay_ratio: {
-      '[0, 0.9]': 'Ratio: under 0.9 (under-repaid)',
-      '(0.9, 1.1]': 'Ratio: 0.9-1.1 (balanced)',
-      '(1.1, 2.0]': 'Ratio: 1.1-2.0 (over-repaid)',
-      '(2.0, inf)': 'Ratio: over 2.0 (excess repayment)',
+      '[0, 0.9]': 'Ratio under 0.9 (under-repaid)',
+      '(0.9, 1.1]': 'Ratio 0.9-1.1 (balanced)',
+      '(1.1, 2.0]': 'Ratio 1.1-2.0 (over-repaid)',
+      '(2.0, inf)': 'Ratio over 2.0 (excess repayment)',
     },
     repay_count: {
       '[0, 3]': '0-3 repayments',
@@ -226,6 +233,10 @@ function formatBinValue(feature, bin) {
       '1': 'Yes',
       '0': 'No',
     },
+    net_flow_direction: {
+      '1': 'Accumulating',
+      '0': 'Depleting',
+    },
   };
 
   return formatters[feature]?.[bin] ?? bin;
@@ -234,8 +245,10 @@ function formatBinValue(feature, bin) {
 // ---------------------------------------------------------------------------
 // Tier badge component
 // ---------------------------------------------------------------------------
+
 const TIER_STYLES = {
   Poor: 'text-danger border-danger/30 bg-danger/10',
+  Insufficient: 'text-danger border-danger/30 bg-danger/10',
   Fair: 'text-warning border-warning/30 bg-warning/10',
   Good: 'text-accent border-accent/30 bg-accent/10',
   Excellent: 'text-accent-bright border-accent-bright/30 bg-accent-bright/10',
@@ -255,12 +268,15 @@ function TierBadge({ tier }) {
 // ---------------------------------------------------------------------------
 // Single feature card
 // ---------------------------------------------------------------------------
+
 function FeatureCard({ factor }) {
   const { feature, display_name, bin, coefficient, is_reference } = factor;
-  const benchmark = BENCHMARKS[feature];
-  const tierMap = TIER_CONFIG[feature] || {};
-  const tier = tierMap[bin] || 'Fair';
+  const meta = FEATURE_META[feature];
+  const tier = getTier(feature, bin);
   const walletValue = formatBinValue(feature, bin);
+  const impact = getImpactLevel(coefficient, is_reference);
+
+  if (!meta) return null;
 
   return (
     <div className="bg-bg-primary/60 border border-border rounded-lg p-4 space-y-3">
@@ -282,43 +298,30 @@ function FeatureCard({ factor }) {
         </span>
       </div>
 
-      {/* Coefficient impact */}
+      {/* Qualitative impact level */}
       <div className="flex items-baseline gap-2">
         <span className="text-xs text-text-muted uppercase tracking-wider">
           Impact
         </span>
-        {is_reference ? (
-          <span className="font-mono text-sm text-text-muted">(baseline)</span>
-        ) : (
-          <span
-            className={`font-mono text-sm ${
-              coefficient > 0 ? 'text-accent' : 'text-danger'
-            }`}
-          >
-            {coefficient > 0 ? '+' : ''}
-            {coefficient.toFixed(4)}
-          </span>
-        )}
+        <span className={`text-sm ${impact.style}`}>
+          {impact.label}
+        </span>
       </div>
 
       {/* Benchmark */}
-      {benchmark && (
-        <div className="flex items-baseline gap-2">
-          <span className="text-xs text-text-muted uppercase tracking-wider">
-            Top wallets
-          </span>
-          <span className="text-xs text-info">{benchmark.display}</span>
-        </div>
-      )}
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs text-text-muted uppercase tracking-wider">
+          Top wallets
+        </span>
+        <span className="text-xs text-info">{meta.benchmark_display}</span>
+      </div>
 
       {/* Action item */}
-      {benchmark && (
-        <div className="border-t border-border/50 pt-2 mt-2">
-          <p className="text-xs text-text-muted leading-relaxed">
-            {benchmark.action_item}
-          </p>
-        </div>
-      )}
+      <div className="border-t border-border/50 pt-2 mt-2">
+        <p className="text-xs text-text-muted leading-relaxed">
+          To improve: {meta.action_item}
+        </p>
+      </div>
     </div>
   );
 }
@@ -326,6 +329,7 @@ function FeatureCard({ factor }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
+
 export default function CreditReport({ factors = [], isExpanded, onToggle }) {
   // Build a lookup from feature name to factor data
   const factorMap = {};
@@ -333,8 +337,8 @@ export default function CreditReport({ factors = [], isExpanded, onToggle }) {
     factorMap[f.feature] = f;
   }
 
-  // Filter to only the 10 source features (exclude net_flow_direction from
-  // the detailed report -- it's a derived boolean with minimal actionability)
+  // Filter to only the features we have metadata for (excludes net_flow_direction
+  // from detailed cards since it's a derived boolean with minimal actionability)
   const orderedFactors = FEATURE_ORDER.map((feat) => factorMap[feat]).filter(
     Boolean
   );
@@ -389,10 +393,9 @@ export default function CreditReport({ factors = [], isExpanded, onToggle }) {
           {/* Preamble */}
           <div className="border-t border-border pt-4">
             <p className="text-xs text-text-muted leading-relaxed">
-              Detailed breakdown of all 10 credit factors. Each factor shows
-              your wallet's assessed tier, coefficient impact on the logistic
-              model, and how top-scoring wallets compare. Tiers: Poor / Fair /
-              Good / Excellent.
+              Detailed breakdown of all credit factors. Each factor shows your
+              assessed tier, its impact on the overall score, how top-scoring
+              wallets compare, and specific steps to improve.
             </p>
           </div>
 
