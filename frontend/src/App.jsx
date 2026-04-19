@@ -64,17 +64,38 @@ export default function App() {
     setReportExpanded(false);
 
     try {
-      const resp = await fetch(`${API_BASE}/score/stream`, {
+      // Try SSE streaming endpoint first (real-time progress)
+      let resp = await fetch(`${API_BASE}/score/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address }),
       });
+
+      // Fallback to JSON endpoint if streaming isn't available (old backend)
+      if (resp.status === 404) {
+        setProgress({ bsc_start: true, crosschain_start: true });
+        resp = await fetch(`${API_BASE}/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address }),
+        });
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        setScoreResult(data);
+        setProgress({ bsc_start: true, bsc_done: true, crosschain_start: true, crosschain_done: true, model_done: true, push_done: true, result: true });
+        await refreshComposite(address);
+        return;
+      }
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
         throw new Error(errData.detail || `HTTP ${resp.status}`);
       }
 
+      // Read SSE stream for real-time progress
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -92,7 +113,6 @@ export default function App() {
           try {
             const event = JSON.parse(line.slice(6));
 
-            // Update progress state based on real backend events
             setProgress(prev => ({ ...prev, [event.event]: true, lastEvent: event }));
 
             if (event.event === 'error') {
