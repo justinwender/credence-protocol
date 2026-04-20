@@ -102,8 +102,8 @@
           "is_reference": true
         }
       ],
-      "composite_score": null,
-      "collateral_ratio_bps": null,
+      "composite_score": 77,
+      "collateral_ratio_bps": 9300,
       "tx_hash": null,
       "error": null
     }
@@ -211,8 +211,8 @@
           "is_reference": true
         }
       ],
-      "composite_score": null,
-      "collateral_ratio_bps": null,
+      "composite_score": 17,
+      "collateral_ratio_bps": 15000,
       "tx_hash": null,
       "error": null
     }
@@ -320,8 +320,8 @@
           "is_reference": true
         }
       ],
-      "composite_score": null,
-      "collateral_ratio_bps": null,
+      "composite_score": 38,
+      "collateral_ratio_bps": 13200,
       "tx_hash": null,
       "error": null
     }
@@ -429,8 +429,8 @@
           "is_reference": true
         }
       ],
-      "composite_score": null,
-      "collateral_ratio_bps": null,
+      "composite_score": 21,
+      "collateral_ratio_bps": 14900,
       "tx_hash": null,
       "error": null
     }
@@ -538,8 +538,8 @@
           "is_reference": true
         }
       ],
-      "composite_score": null,
-      "collateral_ratio_bps": null,
+      "composite_score": 17,
+      "collateral_ratio_bps": 15000,
       "tx_hash": null,
       "error": null
     }
