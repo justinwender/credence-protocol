@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/Credence_Logo_public.jpeg" alt="Credence Protocol" width="400" />
+</p>
+
 # Credence Protocol
 
 **[Live Demo](https://credence-protocol.vercel.app/)** — no setup required.
