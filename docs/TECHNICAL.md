@@ -136,9 +136,11 @@ Open **http://localhost:3000** in your browser.
 
 ### Step 1: Score a Wallet
 
-Open the frontend at http://localhost:3000. You will see a dark-themed dashboard with a wallet search bar.
+Open the frontend at http://localhost:3000. You will see a dark-themed dashboard with a wallet search bar and a set of pre-scored demo wallet chips.
 
-Enter any Ethereum-format wallet address (0x...) or ENS name and press Enter. The UI displays a 4-step credit-card-application-style progress indicator as the pipeline works:
+**Quick start (instant results):** Click any demo wallet chip (Active borrower, Liquidated borrower, Thin file, Crosschain user, Strong history) to load a pre-scored result immediately. These use real wallet data from Venus Protocol borrowers, cached with their full credit report. This is the fastest way to explore different credit profiles.
+
+**Live scoring:** Enter any Ethereum-format wallet address (0x...) or ENS name in the search bar and press Enter. The UI displays a 4-step progress indicator with a live network map showing each blockchain being queried in real time:
 
 1. **Wallet Lookup** -- resolving the address
 2. **Data Collection** -- querying blockchain data (instant for cached/synthetic, ~90s for live)
@@ -154,6 +156,8 @@ After scoring completes, the dashboard shows:
 - **Data completeness indicator** -- which chains contributed data
 - **Collateral ratio** -- the required collateral percentage based on the composite score (75%--150%)
 - **Data source badge** -- whether the score used live, cached, or synthetic data
+- **Activity tier notice** -- if the wallet has no lending history or very limited history, a notice explains that the score has been adjusted downward. The model produces high raw scores for wallets with no lending exposure (zero exposure = zero liquidation risk), but the adjustment corrects for the gap between "safe because never exposed" and "safe because responsibly managed"
+- **Full credit report** -- expandable panel with detailed per-feature analysis: tier rating (Poor/Fair/Good/Excellent), qualitative impact level, benchmark comparison against top-scoring wallets, and specific improvement suggestions
 
 ### Step 3: Connect a Web3 Wallet
 

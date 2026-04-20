@@ -162,6 +162,23 @@ Query B starts with a 3-second delay to avoid back-to-back Allium rate limit hit
 
 After model inference, the pipeline pushes the score to `CreditOracle.setOnchainScore(address, score, chainsUsed)` using web3.py with the deployer's private key. It then reads back the composite score and queries the lending pool for the collateral ratio.
 
+### Activity Tier Adjustments
+
+After model inference and before pushing to the CreditOracle, the pipeline classifies the wallet's activity level and applies a score adjustment. The model produces high scores for wallets with no lending history (zero exposure = zero liquidation risk), but this is misleading as a creditworthiness signal. The adjustment corrects for the gap between "safe because never exposed" and "safe because responsibly managed":
+
+- No onchain activity: score = 0, no contract push
+- No lending history (onchain activity but no Venus events): score scaled by 0.6x
+- Thin lending history (< 2 active days): score scaled by 0.8x
+- Full history (2+ active days): no adjustment
+
+### Pre-Scored Demo Wallets
+
+Five wallets from the training data are pre-scored with full cached API responses in `pipeline/demo_wallets.json`. The backend checks this cache before running the live pipeline. Demo wallet chips on the frontend homepage load these cached results instantly, enabling judges to compare diverse credit profiles (liquidated borrower, thin-file wallet, crosschain power user, strong lending history) without waiting for live queries. Any address typed into the search bar bypasses the cache and runs the full live pipeline.
+
+### Real-Time Progress via SSE
+
+The `/score/stream` endpoint returns server-sent events as each pipeline stage completes. The frontend renders a live network map showing five blockchain nodes (BSC, Ethereum, Arbitrum, Polygon, Optimism) that light up with their brand colors as data arrives. Progress events are real backend milestones (bsc_done, crosschain_done, model_done, push_done), not simulated timers.
+
 ### Rate Limiting
 
 In-memory rate limiting (hackathon-grade): 20 requests per hour per IP, 100 requests per day globally.

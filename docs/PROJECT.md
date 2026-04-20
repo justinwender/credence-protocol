@@ -32,6 +32,10 @@ This is analogous to auto insurance: insurers use telematics (driving behavior d
 
 A user enters a wallet address (or ENS name). Credence's scoring pipeline queries five blockchains in real time via Allium's institutional-grade data infrastructure, computes 10 behavioral features, runs the frozen logistic regression model, and pushes the resulting credit score to the CreditOracle smart contract on BSC. The oracle combines the onchain score with any existing offchain attestation to produce a composite score, which the LendingPool reads to determine the borrower's collateral requirement on a continuous curve from 150% down to 75%. The entire process takes approximately 90 seconds -- like applying for a credit card online.
 
+## Handling the Thin-File Problem
+
+The model was trained on Venus Protocol borrowers, so wallets with no lending history produce high raw scores (minimal exposure means minimal liquidation risk). That is mathematically correct but misleading as a creditworthiness signal. We apply tiered score adjustments after model inference to correct for this: wallets with no lending history have their raw score scaled down (0.6x), wallets with very limited history are scaled moderately (0.8x), and wallets with meaningful track records receive the full model score. The frontend shows both the raw and adjusted scores so users understand the reasoning and what actions would improve their score.
+
 ## Real-World Relevance
 
 - **Same methodology as FICO/VantageScore.** Logistic regression with interpretable coefficients. Every factor's contribution to the score is explainable -- a regulatory requirement that black-box ML models cannot satisfy.
@@ -52,6 +56,12 @@ Credence implements a persistent credit identity system where offchain attestati
 - **Composable credit infrastructure.** Credence scores are composable onchain infrastructure. Any BNB Chain lending protocol can query the CreditOracle contract to read a wallet's composite score and adjust their own underwriting terms. This transforms Credence from a single lending pool into credit scoring infrastructure for the entire DeFi lending ecosystem. The revenue model extends to per-query or subscription fees charged to third-party protocols that integrate Credence scores.
 - **Onchain hard inquiries.** Every CreditOracle query is logged onchain via event emissions, creating a transparent inquiry trail analogous to hard pulls in traditional credit reporting. In production, the frequency of recent score queries would be incorporated as a model feature, penalizing wallets rapidly seeking credit across multiple protocols, exactly as FICO penalizes multiple hard inquiries within a short period.
 
+## Team
+
+Credence was built solo by Justin Wender, currently finishing an MS in Economics and Data Science at Northeastern University (expected July 2026) after completing a BS in Politics, Philosophy, and Economics from Northeastern (Summa Cum Laude, December 2025). Justin is the outgoing President of NEU Blockchain and has held digital asset research roles at Fireblocks and TRGC Amsterdam. He recently accepted a Growth/BDR role at Allium, the institutional blockchain data platform whose infrastructure powers Credence's cross-chain feature engineering. His research spans blockchain economics, DeFi capital markets, and applying traditional finance methodology to onchain systems. [LinkedIn](https://linkedin.com/in/justinwender)
+
 ---
 
 Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.
+
+*For a deeper technical treatment covering model methodology (4 training iterations, coefficient analysis), smart contract design rationale, composite score calibration, and production considerations, see [DEEP_DIVE.md](DEEP_DIVE.md).*

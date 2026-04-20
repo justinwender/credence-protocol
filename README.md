@@ -38,6 +38,11 @@ Open [http://localhost:3000](http://localhost:3000). Full setup details in [TECH
 - [PROJECT.md](docs/PROJECT.md) — Project overview (start here)
 - [TECHNICAL.md](docs/TECHNICAL.md) — Architecture and reproduction instructions
 - [EXTRAS.md](docs/EXTRAS.md) — Demo video and AI build log
+- [DEEP_DIVE.md](docs/DEEP_DIVE.md) — Full technical report: model methodology, contract design rationale, composite score calibration, production considerations (optional, for those who want the details)
+
+## Team
+
+Built solo by Justin Wender. MS Economics and Data Science at Northeastern (July 2026), incoming Growth/BDR at Allium. Previously Digital Asset Research at Fireblocks and TRGC Amsterdam. [LinkedIn](https://linkedin.com/in/justinwender)
 
 ## License
 

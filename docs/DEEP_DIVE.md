@@ -1,4 +1,6 @@
-# Credence Protocol -- Hackathon Report
+# Credence Protocol -- Technical Deep Dive
+
+**Live demo:** [credence-protocol.vercel.app](https://credence-protocol.vercel.app/) | **GitHub:** [github.com/justinwender/credence-protocol](https://github.com/justinwender/credence-protocol)
 
 ## 1. Problem Statement
 
@@ -197,7 +199,28 @@ When a user submits a wallet address for scoring, the frontend displays a 4-step
 3. **Credit Scoring**: running the logistic regression model
 4. **Score Publication**: pushing the score to the CreditOracle contract
 
-Each step animates in sequence with timing matched to the actual pipeline stages. For live Allium queries, the ~90-second wait is real computation across real onchain data, not a cached lookup. Just like applying for a credit card, the wait reflects genuine underwriting work.
+The progress indicator is driven by real-time server-sent events (SSE) from the backend `/score/stream` endpoint. As each query completes on the backend, an event is emitted and the frontend updates immediately. A live network map shows each of the five blockchains (BSC, Ethereum, Arbitrum, Polygon, Optimism) lighting up with its brand color as its data is retrieved, then displaying a checkmark when complete. For live Allium queries, the ~90-second wait reflects genuine computation across real onchain data. For pre-scored demo wallets, the cached response loads instantly.
+
+### Activity Tier Adjustments
+
+The model was trained on Venus Protocol borrowers, so it produces a mathematically valid but misleading output for wallets outside its training population. A wallet with no lending history scores high because it has zero liquidation exposure, but that high score reflects absence of risk, not proven creditworthiness. This is the thin-file problem applied to the scoring pipeline itself.
+
+We address this with tiered score adjustments applied after model inference but before the score is pushed to the CreditOracle. These adjustments correct for the gap between "low risk because never exposed" and "low risk because responsibly managed":
+
+- **No onchain activity**: score set to 0, no contract push, frontend displays "No onchain activity found"
+- **No lending history** (general onchain activity but zero Venus interactions): raw model score scaled by 0.6x, reflecting that the score is based entirely on non-lending features and carries less signal
+- **Thin lending history** (fewer than 2 active lending days): raw model score scaled by 0.8x, reflecting limited track record
+- **Full history** (2+ active lending days): no adjustment, full model score
+
+The frontend displays the activity tier prominently near the score gauge, showing both the raw model score and the adjusted score so the user understands the reasoning and what they can do to improve (build more lending history).
+
+### Pre-Scored Demo Wallets
+
+Five wallets from the training data are pre-scored and cached in `pipeline/demo_wallets.json` with their full API response objects. When a judge clicks a demo wallet chip on the homepage, the backend recognizes the address and returns the cached response instantly, bypassing Allium queries, model inference, and contract push. This enables rapid comparison across diverse credit profiles (liquidated borrower, thin-file wallet, crosschain power user, strong lending history) without 90-second waits per wallet. Any address typed into the search bar still triggers the full live scoring pipeline.
+
+### Full Credit Report
+
+Below the factor breakdown summary, a "View Full Credit Report" expansion panel provides an Experian-style detailed report for each of the 10 model features. Each feature card shows the wallet's assessed tier (Poor, Fair, Good, or Excellent), a qualitative impact level (Very High through Minimal, replacing raw coefficient numbers), a benchmark comparison against top-scoring wallets, and a specific improvement suggestion. Tier assignment uses domain-informed logic: for features where more experience is better (lending activity, repay count, crosschain presence), the highest-activity bin maps to Excellent. For features where the model's reference bin is genuinely safest (repayment ratio near 1.0, high stablecoin allocation), the reference bin maps to Excellent.
 
 ### Bloomberg-Terminal Aesthetic
 
@@ -271,7 +294,7 @@ The identity-persistence mechanism we built is one-directional: offchain identit
 
 ### Justin Wender (Solo Developer)
 
-Justin is completing his MS in Economics and Data Science at Northeastern University (expected July 2026, 3.9 GPA) after earning his BS in Politics, Philosophy, and Economics (Concentration: Logic and Game Theory) Summa Cum Laude in December 2025. He serves as President and Director of Research at NEU Blockchain, Northeastern's blockchain club, where he oversees 12 board members and coordinates relationships with VCs, protocols, and universities.
+Justin is completing his MS in Economics and Data Science at Northeastern University (expected July 2026, 3.9 GPA) after earning his BS in Politics, Philosophy, and Economics (Concentration: Logic and Game Theory) Summa Cum Laude in December 2025. He is the outgoing President of NEU Blockchain, Northeastern's premier blockchain club, where he oversees 12 board members and coordinates relationships with VCs, protocols, and universities.
 
 His professional experience spans digital asset research and blockchain infrastructure. At Fireblocks (Summer 2025), he worked on NYDFS cold custody self-certification, MPC warm wallet implementation, and asset research covering 18 digital assets. At TRGC Amsterdam (November 2024 to March 2025), he evaluated 30+ assets for a $10M fund serving high-net-worth clients.
 
