@@ -70,6 +70,24 @@ export default function AttestationSimulator({ walletAddress, registry, onAttest
 
   const identityHash = ethers.keccak256(ethers.toUtf8Bytes(identityLabel));
 
+  async function handleClear() {
+    if (!registry || !walletAddress) return;
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const tx = await registry.clearAttestation(walletAddress);
+      setFeedback({ type: 'pending', message: `Clearing: ${tx.hash.slice(0, 18)}...` });
+      await tx.wait();
+      setFeedback({ type: 'success', message: 'Attestation cleared' });
+      onAttestationSubmitted?.();
+    } catch (err) {
+      const msg = err?.reason || err?.shortMessage || err?.message || 'Transaction failed';
+      setFeedback({ type: 'error', message: msg });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!registry || !walletAddress) return;
     setLoading(true);
@@ -218,6 +236,14 @@ export default function AttestationSimulator({ walletAddress, registry, onAttest
             }`}
           >
             {loading ? 'Confirming...' : 'Submit Attestation'}
+          </button>
+
+          <button
+            onClick={handleClear}
+            disabled={loading || !walletAddress}
+            className="w-full py-1.5 rounded text-xs text-text-muted hover:text-danger hover:bg-danger/10 border border-border hover:border-danger/30 transition-colors"
+          >
+            Clear Attestation
           </button>
 
           {/* Feedback */}

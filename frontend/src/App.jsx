@@ -281,8 +281,8 @@ export default function App() {
                   onchainScore={scoreResult.credit_score}
                   chainsUsed={scoreResult.chains_used}
                   dataCompleteness={scoreResult.data_completeness}
-                  hasAttestation={compositeData?.hasAttestation ?? false}
-                  offchainScore={compositeData?.offchainScore ?? 0}
+                  hasAttestation={compositeData?.hasAttestation ?? scoreResult.has_attestation ?? false}
+                  offchainScore={compositeData?.offchainScore ?? scoreResult.offchain_score ?? 0}
                   isUsingInheritedScore={compositeData?.isUsingInheritedScore ?? false}
                 />
               </div>

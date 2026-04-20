@@ -105,7 +105,9 @@
       "composite_score": 77,
       "collateral_ratio_bps": 9300,
       "tx_hash": null,
-      "error": null
+      "error": null,
+      "has_attestation": true,
+      "offchain_score": 87
     }
   },
   "0x1120ecaff5cda10c370490fc99d99ba3faecd19c": {
@@ -214,7 +216,9 @@
       "composite_score": 17,
       "collateral_ratio_bps": 15000,
       "tx_hash": null,
-      "error": null
+      "error": null,
+      "has_attestation": false,
+      "offchain_score": 0
     }
   },
   "0x1a526787c277a2636c85c063a238823ca4798bac": {
@@ -323,7 +327,9 @@
       "composite_score": 38,
       "collateral_ratio_bps": 13200,
       "tx_hash": null,
-      "error": null
+      "error": null,
+      "has_attestation": false,
+      "offchain_score": 0
     }
   },
   "0xd574df2073064f06c90c557a85c1c000d2448a6d": {
@@ -432,7 +438,9 @@
       "composite_score": 21,
       "collateral_ratio_bps": 14900,
       "tx_hash": null,
-      "error": null
+      "error": null,
+      "has_attestation": false,
+      "offchain_score": 0
     }
   },
   "0x14279617d8357a4b23e81ea6fadcb1d4dbea0faa": {
@@ -541,7 +549,9 @@
       "composite_score": 17,
       "collateral_ratio_bps": 15000,
       "tx_hash": null,
-      "error": null
+      "error": null,
+      "has_attestation": false,
+      "offchain_score": 0
     }
   }
 }
