@@ -47,7 +47,7 @@ Data flows:
 
 ## Layer 1: Data and Feature Engineering
 
-We trained on 115,687 Venus Protocol borrowers on BSC, labeled by a binary question: has this wallet ever been liquidated on Venus? Venus was the only label source. Other BNB lending protocols (Radiant, Alpaca) use different liquidation mechanics, and mixing them would have introduced label noise.
+The model was trained on 115,687 Venus Protocol borrowers on BSC, labeled by a binary question: has this wallet ever been liquidated on Venus? Venus was the only label source. Other BNB lending protocols (Radiant, Alpaca) use different liquidation mechanics, and mixing them would have introduced label noise.
 
 Features come from BSC and four crosschain networks (Ethereum, Arbitrum, Polygon, Optimism), spanning five categories:
 
@@ -63,7 +63,7 @@ Performance: AUC 0.8182, precision 0.9508, recall 0.7208.
 
 The dominant feature is Borrowing protocol activity (days), measuring how many days a wallet has had any Venus lending activity. Its coefficients are the largest in the model: -0.80 for 2-4 days, -1.05 for 5-14 days, -1.23 for 15+ days. The reference bin (1 day, the safest) captures wallets with minimal lending exposure. This creates the thin-file dynamic discussed in the composite score section below.
 
-The model is frozen. We do not retrain it.
+The model is frozen and will not be retrained.
 
 
 ## Layer 2: Smart Contracts
@@ -147,7 +147,7 @@ The pipeline degrades gracefully across three tiers:
 | 1 (Cached) | `demo_wallets.json` (real wallet features captured during development) | Instant | API key missing or query fails, wallet is in cache |
 | 2 (Synthetic) | Deterministic features generated from SHA-256 of the address | Instant | Fallback for any unknown wallet |
 
-The model runs on every request regardless of data source. The `data_source` field in the response ("live", "cached", or "synthetic") tells the frontend exactly what happened. We never silently degrade.
+The model runs on every request regardless of data source. The `data_source` field in the response ("live", "cached", or "synthetic") tells the frontend exactly what happened. The pipeline never silently degrades.
 
 ### Query Architecture
 

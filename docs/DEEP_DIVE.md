@@ -12,11 +12,11 @@ The capital inefficiency is not abstract. A borrower who wants $10,000 in USDC m
 
 ## 2. Solution Overview
 
-Credence Protocol is a two-source composite credit scoring system deployed on BNB Chain. We combine two independent risk signals into a single onchain score that determines collateral requirements on a continuous curve from 150% down to 75%.
+Credence Protocol is a two-source composite credit scoring system deployed on BNB Chain. It combines two independent risk signals into a single onchain score that determines collateral requirements on a continuous curve from 150% down to 75%.
 
-The first signal is an onchain behavioral score. We trained a FICO-methodology logistic regression model on 115,687 Venus Protocol borrowers across five blockchains (BSC, Ethereum, Arbitrum, Polygon, Optimism). The model ingests 10 features spanning lending behavior, portfolio composition, and cross-chain activity, and outputs a 0-100 credit score with interpretable coefficients. Every factor's contribution to the score is explainable, matching the transparency requirements that regulators impose on traditional credit scoring.
+The first signal is an onchain behavioral score. I trained a FICO-methodology logistic regression model on 115,687 Venus Protocol borrowers across five blockchains (BSC, Ethereum, Arbitrum, Polygon, Optimism). The model ingests 10 features spanning lending behavior, portfolio composition, and cross-chain activity, and outputs a 0-100 credit score with interpretable coefficients. Every factor's contribution to the score is explainable, matching the transparency requirements that regulators impose on traditional credit scoring.
 
-The second signal is an offchain credit attestation. We simulate ZKredit, a system where traditional credit data (a FICO score) is verified via zero-knowledge proofs and attested onchain without exposing personal information. In the demo, an admin sets attestations to show the mechanism. In production, a ZK verifier contract would validate Brevis or Primus proofs before writing the attestation.
+The second signal is an offchain credit attestation. Credence simulates ZKredit, a system where traditional credit data (a FICO score) is verified via zero-knowledge proofs and attested onchain without exposing personal information. In the demo, an admin sets attestations to show the mechanism. In production, a ZK verifier contract would validate Brevis or Primus proofs before writing the attestation.
 
 The two signals combine asymmetrically. Offchain attestation establishes a competitive baseline, reflecting verified real-world creditworthiness. Onchain data boosts above that baseline, reflecting DeFi-specific competence that offchain data cannot measure. Onchain data alone is capped, because a high score from thin onchain activity is not equivalent to proven creditworthiness.
 
@@ -24,7 +24,7 @@ The two signals combine asymmetrically. Offchain attestation establishes a compe
 
 Credence is a four-layer system. For full technical detail, see `docs/architecture.md` and `docs/TECHNICAL.md`.
 
-**Layer 1, Data and Feature Engineering.** We wrote Allium Explorer SQL queries to extract training data from five blockchains. Labels came exclusively from Venus Protocol liquidation events on BSC: a binary indicator of whether each borrower wallet was ever liquidated. Features span four categories: lending behavior (days active, repayment consistency, distinct assets borrowed), financial profile (portfolio value, stablecoin allocation, accumulation trend), DeFi sophistication (DEX activity), and cross-chain breadth (transaction volume, chains used, bridge usage). The result is a FICO-style scorecard that bins continuous features into discrete risk tiers, exactly as traditional credit bureaus do.
+**Layer 1, Data and Feature Engineering.** I wrote Allium Explorer SQL queries to extract training data from five blockchains. Labels came exclusively from Venus Protocol liquidation events on BSC: a binary indicator of whether each borrower wallet was ever liquidated. Features span four categories: lending behavior (days active, repayment consistency, distinct assets borrowed), financial profile (portfolio value, stablecoin allocation, accumulation trend), DeFi sophistication (DEX activity), and cross-chain breadth (transaction volume, chains used, bridge usage). The result is a FICO-style scorecard that bins continuous features into discrete risk tiers, exactly as traditional credit bureaus do.
 
 **Layer 2, Smart Contracts.** Three Solidity contracts deployed and verified on BSC Testnet (chain ID 97). The `OffchainAttestationRegistry` stores FICO-equivalent attestations with a persistent identity hash that survives wallet rebinding (Sybil resistance). The `CreditOracle` stores onchain scores pushed by the scoring pipeline, reads attestations from the registry, and exposes a composite score on-read using configurable asymmetric weighting. The `LendingPool` implements deposit, borrow, and repay operations with a continuous five-segment collateral curve driven by the composite score. The test suite contains 79 tests with 99.5% line coverage.
 
@@ -34,7 +34,7 @@ Credence is a four-layer system. For full technical detail, see `docs/architectu
 
 ### Bidirectional Credit Identity (Full Vision)
 
-The identity-persistence mechanism we implemented is a one-directional primitive: an offchain identity anchors onchain reputation. The full vision is bidirectional. Onchain behavior feeds back into the persistent identity record, creating a unified credit profile that spans wallets, protocols, and chains. Over time, this produces a portable, unforgeable credit identity that:
+The identity-persistence mechanism I implemented is a one-directional primitive: an offchain identity anchors onchain reputation. The full vision is bidirectional. Onchain behavior feeds back into the persistent identity record, creating a unified credit profile that spans wallets, protocols, and chains. Over time, this produces a portable, unforgeable credit identity that:
 
 - Spans multiple wallets (rebinding preserves the identity's accumulated score)
 - Accumulates reputation across DeFi activity (new behavior updates the persistent record)
@@ -47,13 +47,13 @@ The submitted demo is the first primitive step toward this picture. The contract
 
 ### Training Data
 
-We collected data on 115,687 Venus Protocol borrowers, of which 15,889 (13.7%) were liquidated at least once. All labels come from Venus Protocol liquidation events on BSC. We deliberately excluded other BNB Chain lending protocols (Radiant, Alpaca Finance) because their liquidation mechanics differ, and mixing label semantics across protocols would contaminate the training signal. Venus alone provided a dataset large enough for robust logistic regression.
+I collected data on 115,687 Venus Protocol borrowers, of which 15,889 (13.7%) were liquidated at least once. All labels come from Venus Protocol liquidation events on BSC. I deliberately excluded other BNB Chain lending protocols (Radiant, Alpaca Finance) because their liquidation mechanics differ, and mixing label semantics across protocols would contaminate the training signal. Venus alone provided a dataset large enough for robust logistic regression.
 
 Feature data spans five blockchains: BSC (required for all wallets), Ethereum, Arbitrum, Polygon, and Optimism (best-effort, providing cross-chain breadth signals). All data was queried via Allium Explorer SQL against institutional-grade indexed blockchain data.
 
 ### Feature Engineering
 
-We computed 10 features across four categories, using a FICO-style scorecard approach where each continuous feature is binned into 3-5 discrete risk tiers. The lowest-risk bin serves as the reference category (dropped from one-hot encoding), so every retained coefficient represents the credit score penalty for being in that tier relative to the safest bucket. The final model uses 24 one-hot columns derived from the 10 source features.
+I computed 10 features across four categories, using a FICO-style scorecard approach where each continuous feature is binned into 3-5 discrete risk tiers. The lowest-risk bin serves as the reference category (dropped from one-hot encoding), so every retained coefficient represents the credit score penalty for being in that tier relative to the safest bucket. The final model uses 24 one-hot columns derived from the 10 source features.
 
 The features and their rationale:
 
@@ -73,17 +73,17 @@ The features and their rationale:
 
 ### Model Training and Iteration
 
-We trained a logistic regression model with L2 regularization, balanced class weights, and 5-fold stratified cross-validation. The choice of logistic regression was deliberate: it matches FICO/VantageScore methodology, produces interpretable coefficients (every factor's contribution is explainable), and satisfies regulatory transparency requirements that black-box ML models cannot meet.
+I trained a logistic regression model with L2 regularization, balanced class weights, and 5-fold stratified cross-validation. The choice of logistic regression was deliberate: it matches FICO/VantageScore methodology, produces interpretable coefficients (every factor's contribution is explainable), and satisfies regulatory transparency requirements that black-box ML models cannot meet.
 
-We iterated through four training rounds, each addressing specific issues identified in the previous round:
+I iterated through four training rounds, each addressing specific issues identified in the previous round:
 
 1. **Initial logit with continuous features.** AUC 0.81, but multicollinearity between features (total lending volume correlated with repayment count, wallet age correlated with lending active days) inflated variance in coefficient estimates.
 
-2. **FICO scorecard conversion.** We binned all continuous features into discrete tiers, converting the model to a proper scorecard. AUC improved to 0.845, but 25 coefficient sign flags appeared (bins where the coefficient direction contradicted economic intuition, such as more repayments increasing liquidation risk).
+2. **FICO scorecard conversion.** I binned all continuous features into discrete tiers, converting the model to a proper scorecard. AUC improved to 0.845, but 25 coefficient sign flags appeared (bins where the coefficient direction contradicted economic intuition, such as more repayments increasing liquidation risk).
 
-3. **Tier 1 fixes.** We dropped `total_lending_volume` (redundant with repayment count) and collapsed the `[0, 0]` bin of Repayment consistency ratio into the adjacent bin (zero-ratio wallets are mechanically different from low-ratio wallets). Sign flags reduced but remained.
+3. **Tier 1 fixes.** I dropped `total_lending_volume` (redundant with repayment count) and collapsed the `[0, 0]` bin of Repayment consistency ratio into the adjacent bin (zero-ratio wallets are mechanically different from low-ratio wallets). Sign flags reduced but remained.
 
-4. **Feature cuts.** We dropped 7 correlated features including wallet age, BSC DEX trade count, and total lending volume. The final model uses 10 features with 24 one-hot columns, achieves AUC 0.8182, and has 0 serious sign flags. Every coefficient direction aligns with economic intuition.
+4. **Feature cuts.** I dropped 7 correlated features including wallet age, BSC DEX trade count, and total lending volume. The final model uses 10 features with 24 one-hot columns, achieves AUC 0.8182, and has 0 serious sign flags. Every coefficient direction aligns with economic intuition.
 
 ### Top 5 Coefficients
 
@@ -95,7 +95,7 @@ We iterated through four training rounds, each addressing specific issues identi
 | 4 | Repayment consistency ratio | Over 2.0x | -0.60 | Repaying more than double what was borrowed signals unusual behavior (over-repaying due to liquidation pressure or position mismanagement). |
 | 5 | Repayment consistency ratio | 1.1-2.0x | -0.54 | Even moderate imbalance increases risk relative to the 0.9-1.1 balanced range. |
 
-The dominance of Borrowing protocol activity (days) is the most important finding. Wallets that borrowed once and repaid once score near 98, because minimal exposure means minimal risk. This is mechanically correct but creates a "thin-file" problem: a high score achieved through minimal activity is not equivalent to a high score earned through extensive, well-managed exposure. We address this at the contract layer (see Section 5).
+The dominance of Borrowing protocol activity (days) is the most important finding. Wallets that borrowed once and repaid once score near 98, because minimal exposure means minimal risk. This is mechanically correct but creates a "thin-file" problem: a high score achieved through minimal activity is not equivalent to a high score earned through extensive, well-managed exposure. Credence addresses this at the contract layer (see Section 5).
 
 ### Model Performance
 
@@ -172,9 +172,9 @@ The smart contract test suite contains 79 tests achieving 99.5% line coverage. T
 
 ## 6. ZKredit Integration Architecture
 
-### What We Built
+### What I Built
 
-For the hackathon, we simulate ZKredit with admin-set attestations. The `OffchainAttestationRegistry` contract accepts a struct containing a FICO score (mapped linearly from 300-850 to 0-100), an identity hash, and a verified flag. An admin wallet (the contract owner) calls `setAttestation` to write these values. This demonstrates the full composite scoring flow without requiring a live ZK proof system.
+For the hackathon, Credence simulates ZKredit with admin-set attestations. The `OffchainAttestationRegistry` contract accepts a struct containing a FICO score (mapped linearly from 300-850 to 0-100), an identity hash, and a verified flag. An admin wallet (the contract owner) calls `setAttestation` to write these values. This demonstrates the full composite scoring flow without requiring a live ZK proof system.
 
 ### What Production Looks Like
 
@@ -205,7 +205,7 @@ The progress indicator is driven by real-time server-sent events (SSE) from the 
 
 The model was trained on Venus Protocol borrowers, so it produces a mathematically valid but misleading output for wallets outside its training population. A wallet with no lending history scores high because it has zero liquidation exposure, but that high score reflects absence of risk, not proven creditworthiness. This is the thin-file problem applied to the scoring pipeline itself.
 
-We address this with tiered score adjustments applied after model inference but before the score is pushed to the CreditOracle. These adjustments correct for the gap between "low risk because never exposed" and "low risk because responsibly managed":
+Credence addresses this with tiered score adjustments applied after model inference but before the score is pushed to the CreditOracle. These adjustments correct for the gap between "low risk because never exposed" and "low risk because responsibly managed":
 
 - **No onchain activity**: score set to 0, no contract push, frontend displays "No onchain activity found"
 - **No lending history** (general onchain activity but zero Venus interactions): raw model score scaled by 0.6x, reflecting that the score is based entirely on non-lending features and carries less signal
@@ -234,7 +234,7 @@ The frontend uses Web3Modal for wallet connectivity, supporting MetaMask, Wallet
 
 This section addresses the central claim of the protocol: that combining onchain and offchain signals provides more complete risk coverage than either signal alone.
 
-There is no published evidence that onchain data improves FICO's prediction of default risk. We do not claim it does.
+There is no published evidence that onchain data improves FICO's prediction of default risk. I do not claim it does.
 
 Instead, the two sources measure fundamentally different risk domains. FICO measures offchain financial behavior: bill payments, credit utilization, account history, income stability. It cannot measure DeFi-specific risk, such as how a borrower manages health factors, whether they have survived market volatility without liquidation, or how they interact with smart contracts across multiple chains. Onchain behavioral data measures exactly these DeFi-native risks, but it cannot measure income, employment stability, or broader credit obligations.
 
@@ -252,7 +252,7 @@ The 90-second scoring latency in the demo comes from ad-hoc SQL queries against 
 
 ### FICO Mapping Nonlinearity
 
-The `CreditOracle.mapFicoToZero100` function linearly maps FICO 300-850 to 0-100. This means FICO 575 (the midpoint of the range) maps to 50, and FICO 300 maps to 0. In practice, almost no DeFi borrower has a FICO score under 500, so the bottom third of the mapping is dead space that wastes resolution. In production, we would replace this with a nonlinear mapping (piecewise-linear or sigmoid-shaped) that concentrates resolution in the 600-800 range where actual lending decisions cluster. This would give the protocol finer-grained discrimination between borrowers in the decision-relevant FICO range.
+The `CreditOracle.mapFicoToZero100` function linearly maps FICO 300-850 to 0-100. This means FICO 575 (the midpoint of the range) maps to 50, and FICO 300 maps to 0. In practice, almost no DeFi borrower has a FICO score under 500, so the bottom third of the mapping is dead space that wastes resolution. In production, this would be replaced with a nonlinear mapping (piecewise-linear or sigmoid-shaped) that concentrates resolution in the 600-800 range where actual lending decisions cluster. This would give the protocol finer-grained discrimination between borrowers in the decision-relevant FICO range.
 
 ### Real ZK Proof Integration
 
@@ -268,7 +268,7 @@ The demo LendingPool implements basic deposit/borrow/repay without a liquidation
 
 ### Multi-Protocol Training Data
 
-We trained exclusively on Venus Protocol liquidation data to maintain clean label semantics. Other BSC lending protocols (Radiant, Alpaca Finance) use different liquidation mechanics, and mixing them would introduce label noise. In production, we would expand training data to include Aave, Compound, and MakerDAO liquidations (after normalizing for protocol-specific mechanics), improving the model's generalization across lending environments.
+I trained exclusively on Venus Protocol liquidation data to maintain clean label semantics. Other BSC lending protocols (Radiant, Alpaca Finance) use different liquidation mechanics, and mixing them would introduce label noise. In production, the training data would expand to include Aave, Compound, and MakerDAO liquidations (after normalizing for protocol-specific mechanics), improving the model's generalization across lending environments.
 
 ### Governance for Parameter Tuning
 
@@ -288,7 +288,7 @@ Onchain credit inquiries are the natural analog of hard pulls in traditional cre
 
 ### Bidirectional Credit Identity
 
-The identity-persistence mechanism we built is one-directional: offchain identity anchors onchain reputation. The full production vision is bidirectional. Onchain behavior feeds back into the offchain credit profile, creating a unified credit record that spans wallets, protocols, and chains. A borrower who demonstrates consistent repayment behavior across multiple DeFi protocols would see that track record reflected not just in their onchain score, but in their persistent identity record. This produces a portable, unforgeable credit identity for DeFi, the infrastructure needed for true undercollateralized lending at scale.
+The identity-persistence mechanism I built is one-directional: offchain identity anchors onchain reputation. The full production vision is bidirectional. Onchain behavior feeds back into the offchain credit profile, creating a unified credit record that spans wallets, protocols, and chains. A borrower who demonstrates consistent repayment behavior across multiple DeFi protocols would see that track record reflected not just in their onchain score, but in their persistent identity record. This produces a portable, unforgeable credit identity for DeFi, the infrastructure needed for true undercollateralized lending at scale.
 
 ## 9. Team and Acknowledgments
 

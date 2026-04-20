@@ -34,7 +34,7 @@ A user enters a wallet address (or ENS name). Credence's scoring pipeline querie
 
 ## Handling the Thin-File Problem
 
-The model was trained on Venus Protocol borrowers, so wallets with no lending history produce high raw scores (minimal exposure means minimal liquidation risk). That is mathematically correct but misleading as a creditworthiness signal. We apply tiered score adjustments after model inference to correct for this: wallets with no lending history have their raw score scaled down (0.6x), wallets with very limited history are scaled moderately (0.8x), and wallets with meaningful track records receive the full model score. The frontend shows both the raw and adjusted scores so users understand the reasoning and what actions would improve their score.
+The model was trained on Venus Protocol borrowers, so wallets with no lending history produce high raw scores (minimal exposure means minimal liquidation risk). That is mathematically correct but misleading as a creditworthiness signal. Credence applies tiered score adjustments after model inference to correct for this: wallets with no lending history have their raw score scaled down (0.6x), wallets with very limited history are scaled moderately (0.8x), and wallets with meaningful track records receive the full model score. The frontend shows both the raw and adjusted scores so users understand the reasoning and what actions would improve their score.
 
 ## Real-World Relevance
 
