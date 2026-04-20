@@ -320,4 +320,4 @@ All three contracts are verified on BscScan. Source code is readable directly on
 
 ---
 
-Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.
+Credence applies battle-tested credit scoring methodology to onchain data for the first time, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite with the same rigor the real world does.

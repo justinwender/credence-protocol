@@ -98,7 +98,7 @@ Final model: 10 features, 24 one-hot columns, AUC 0.8182, 0 serious sign flags. 
 
 **AI did:** Wrote all documentation deliverables (bsc.address, README.md, PROJECT.md, TECHNICAL.md, EXTRAS.md, architecture.md, pitch_narrative.md, demo_script.md, DEEP_DIVE.md, this build log).
 
-**Human did:** Specified the judge's starter kit alignment (bsc.address, PROJECT.md, TECHNICAL.md, EXTRAS.md structure). Directed the information-asymmetry framing for the "two signals compound" claim (explicitly disclaiming that onchain data improves FICO). Wrote the punchline. Specified the writing style (active voice, first person plural, no em dashes, concrete examples over abstractions). Directed that pitch_narrative.md and demo_script.md be gitignored as internal prep documents. Directed the API composability paragraph for the production roadmap. Directed the Vercel + Render deployment setup.
+**Human did:** Specified the judge's starter kit alignment (bsc.address, PROJECT.md, TECHNICAL.md, EXTRAS.md structure). Directed the information-asymmetry framing for the "two signals compound" claim (explicitly disclaiming that onchain data improves FICO). Wrote the punchline. Specified the writing style (active voice, first person plural, concrete examples over abstractions). Directed that internal prep and claude-specific documents be gitignored. Directed the API composability paragraph for the production roadmap. Directed the Vercel + Render deployment setup.
 
 ## Summary
 

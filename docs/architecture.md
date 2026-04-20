@@ -63,7 +63,7 @@ Performance: AUC 0.8182, precision 0.9508, recall 0.7208.
 
 The dominant feature is Borrowing protocol activity (days), measuring how many days a wallet has had any Venus lending activity. Its coefficients are the largest in the model: -0.80 for 2-4 days, -1.05 for 5-14 days, -1.23 for 15+ days. The reference bin (1 day, the safest) captures wallets with minimal lending exposure. This creates the thin-file dynamic discussed in the composite score section below.
 
-The model is frozen and will not be retrained.
+The model was frozen on 4/16 and will not be retrained prior to hackathon submission.
 
 
 ## Layer 2: Smart Contracts

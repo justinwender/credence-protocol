@@ -4,7 +4,7 @@
 
 DeFi lending today requires 150%+ collateralization on every loan. Protocols like Aave, Compound, and Venus have no mechanism to assess borrower creditworthiness, so they treat every borrower identically: overcollateralize or don't borrow. This locks billions in excess collateral across the ecosystem and excludes creditworthy borrowers from capital-efficient terms.
 
-Traditional finance solved this problem decades ago with credit scoring. FICO and VantageScore use logistic regression to predict default probability from historical financial behavior, enabling risk-adjusted lending terms. DeFi has no equivalent. Credence builds one.
+Traditional finance solved this problem decades ago with credit scoring. FICO and VantageScore use logistic regression to predict default probability from historical financial behavior, enabling risk-adjusted lending terms. DeFi has no equivalent with a methodology similar to FICO and VantageScore.
 
 ## Solution: Credence Protocol
 
@@ -14,7 +14,7 @@ Credence is a two-source composite credit scoring system deployed on BNB Chain. 
 
 **Source 2 -- Offchain credit attestation.** Simulates ZKredit, a system where traditional credit data (FICO score) is verified via zero-knowledge proofs and attested onchain without exposing personal information. In the demo, an admin sets attestations; in production, a ZK verifier contract validates Brevis/Primus proofs.
 
-**Composite scoring.** The two sources combine asymmetrically. Offchain attestation establishes a competitive baseline (reflecting verified real-world creditworthiness). Onchain data boosts above that baseline (reflecting DeFi-specific competence). Onchain data alone is capped -- a high score from thin onchain activity is not equivalent to proven creditworthiness. All weighting parameters are configurable onchain.
+**Composite scoring.** The two sources combine asymmetrically. Offchain attestation establishes a competitive baseline (reflecting verified real-world creditworthiness). Onchain data boosts above that baseline (reflecting DeFi-specific competence). Onchain data alone is capped -- a high score from  onchain activity is not equivalent to proven creditworthiness. All weighting parameters are configurable onchain.
 
 ## Value Proposition: Two Risk Domains, Not Two Data Points
 
@@ -30,7 +30,7 @@ This is analogous to auto insurance: insurers use telematics (driving behavior d
 
 ## How It Works
 
-A user enters a wallet address (or ENS name). Credence's scoring pipeline queries five blockchains in real time via Allium's institutional-grade data infrastructure, computes 10 behavioral features, runs the frozen logistic regression model, and pushes the resulting credit score to the CreditOracle smart contract on BSC. The oracle combines the onchain score with any existing offchain attestation to produce a composite score, which the LendingPool reads to determine the borrower's collateral requirement on a continuous curve from 150% down to 75%. The entire process takes approximately 90 seconds -- like applying for a credit card online.
+A user enters a wallet address (or ENS name). Credence's scoring pipeline queries five blockchains in real time via Allium's institutional-grade data infrastructure, computes 10 behavioral features, runs the frozen logistic regression model, and pushes the resulting credit score to the CreditOracle smart contract on BSC. The oracle combines the onchain score with any existing offchain attestation to produce a composite score, which the LendingPool reads to determine the borrower's collateral requirement on a continuous curve from 150% down to 75%. The entire process takes approximately 90 seconds -- similar to applying for a credit card online.
 
 ## Handling the Thin-File Problem
 
@@ -52,16 +52,16 @@ Credence implements a persistent credit identity system where offchain attestati
 - **ZKredit integration.** Replace admin-set attestations with zero-knowledge proofs verified onchain via Brevis or Primus, enabling trustless offchain credit attestation without exposing personal data.
 - **Latency optimization.** Pre-compute wallet features using materialized views or a dedicated indexing service, reducing scoring latency from 90 seconds to single-digit seconds. Model inference is already sub-millisecond; the bottleneck is data retrieval, which is a solved engineering problem at scale.
 - **Multi-protocol training data.** Expand beyond Venus to include Aave, Compound, and MakerDAO liquidation data, improving model generalization across lending protocols.
-- **Bidirectional credit identity.** Onchain behavior feeds back into the persistent identity record, creating a unified credit profile that spans wallets, protocols, and chains, a portable, unforgeable credit identity for DeFi.
+- **Bidirectional credit identity.** Onchain behavior feeds back into the persistent identity record, creating a unified credit profile that spans wallets, protocols, and chains: a portable, unforgeable credit identity for DeFi.
 - **Composable credit infrastructure.** Credence scores are composable onchain infrastructure. Any BNB Chain lending protocol can query the CreditOracle contract to read a wallet's composite score and adjust their own underwriting terms. This transforms Credence from a single lending pool into credit scoring infrastructure for the entire DeFi lending ecosystem. The revenue model extends to per-query or subscription fees charged to third-party protocols that integrate Credence scores.
-- **Onchain hard inquiries.** Every CreditOracle query is logged onchain via event emissions, creating a transparent inquiry trail analogous to hard pulls in traditional credit reporting. In production, the frequency of recent score queries would be incorporated as a model feature, penalizing wallets rapidly seeking credit across multiple protocols, exactly as FICO penalizes multiple hard inquiries within a short period.
+- **Onchain hard inquiries.** Every CreditOracle query is logged onchain via event emissions, creating a transparent inquiry trail analogous to hard pulls in traditional credit reporting. In production, the frequency of recent score queries would be incorporated as a model feature, penalizing wallets rapidly seeking credit across multiple protocols, exactly as FICO penalizes multiple hard inquiries within a short period (with exceptions to cases such as shopping for car loans).
 
 ## Team
 
-Credence was built solo by Justin Wender, currently finishing an MS in Economics and Data Science at Northeastern University (expected July 2026) after completing a BS in Politics, Philosophy, and Economics from Northeastern (Summa Cum Laude, December 2025). Justin is the outgoing President of NEU Blockchain and has held digital asset research roles at Fireblocks and TRGC Amsterdam. He recently accepted a Growth/BDR role at Allium, the institutional blockchain data platform whose infrastructure powers Credence's cross-chain feature engineering. His research spans blockchain economics, DeFi capital markets, and applying traditional finance methodology to onchain systems. [LinkedIn](https://linkedin.com/in/justinwender)
+Credence was built solo by Justin Wender, currently finishing an MS in Economics and Data Science at Northeastern University (expected July 2026) after completing a BS in Politics, Philosophy, and Economics from Northeastern (Summa Cum Laude, December 2025). Justin is the outgoing President of NEU Blockchain and has held digital asset research roles at Fireblocks and TRGC Amsterdam. He recently accepted a Growth/BDR role at Allium, the institutional blockchain data platform whose infrastructure powers Credence's cross-chain feature engineering. His research spans blockchain economics, DeFi capital markets, and applying battle-tested traditional finance methodology to onchain systems. [LinkedIn](https://linkedin.com/in/justinwender)
 
 ---
 
-Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.
+Credence applies battle-tested credit scoring methodology to onchain data for the first time, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite with the same rigor the real world does.
 
 *For a deeper technical treatment covering model methodology (4 training iterations, coefficient analysis), smart contract design rationale, composite score calibration, and production considerations, see [DEEP_DIVE.md](DEEP_DIVE.md).*

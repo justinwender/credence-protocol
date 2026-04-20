@@ -8,7 +8,7 @@
 
 Onchain credit scoring and undercollateralized lending on BNB Chain. Credence blends two independent credit signals — onchain wallet behavior across 5 blockchains and ZK-verified offchain credit attestations — into a composite score that determines collateral requirements on a continuous curve. The result: creditworthy borrowers access capital-efficient lending terms that neither traditional finance nor existing DeFi protocols can offer alone.
 
-**Credence is the first protocol to bring traditional credit scoring methodology onchain, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite like the real world does.**
+**Credence applies battle-tested credit scoring methodology to onchain data for the first time, because the trillion-dollar lending market won't move to DeFi until DeFi can underwrite with the same rigor the real world does.**
 
 No external API keys are required. For the full live-data experience, visit the deployed demo at [credence-protocol.vercel.app](https://credence-protocol.vercel.app/). To run locally without an Allium API key, the pipeline uses cached or synthetic data with full model inference. See [docs/TECHNICAL.md](docs/TECHNICAL.md) for details.
 
@@ -23,13 +23,13 @@ No external API keys are required. For the full live-data experience, visit the 
 ## Quick Start
 
 ```bash
-git clone <repo-url> && cd credence-protocol
+git clone https://github.com/justinwender/credence-protocol.git && cd credence-protocol
 pip install -r pipeline/requirements.txt
 cd frontend && npm install && cd ..
 cp .env.example .env
 
 # Terminal 1: Backend
-python3 -m uvicorn pipeline.api:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
 
 # Terminal 2: Frontend
 cd frontend && npm run dev
