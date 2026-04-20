@@ -86,7 +86,9 @@ export default function App() {
         const data = await resp.json();
         setScoreResult(data);
         setProgress({ bsc_start: true, bsc_done: true, crosschain_start: true, crosschain_done: true, model_done: true, push_done: true, result: true });
-        await refreshComposite(address);
+        if (data.data_source === 'live') {
+          await refreshComposite(address);
+        }
         return;
       }
 
@@ -121,7 +123,11 @@ export default function App() {
 
             if (event.event === 'result') {
               setScoreResult(event.data);
-              await refreshComposite(address);
+              // Only read from on-chain if the score was pushed (live scoring).
+              // Cached results already include correct composite + collateral.
+              if (event.data.data_source === 'live') {
+                await refreshComposite(address);
+              }
             }
           } catch (parseErr) {
             if (parseErr.message && !parseErr.message.includes('JSON')) {
